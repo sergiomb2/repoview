@@ -13,8 +13,8 @@ Source0:        http://linux.duke.edu/projects/mini/%{name}/download/%{name}-%{v
 BuildRoot:      %{_tmppath}/%{name}-%{version}-root
 BuildArch:      noarch
 
-BuildRequires:  sed >= 4, python-kid >= 0.6
-Requires:       python >= 2.2, python-kid >= 0.6, python-elementtree
+BuildRequires:  sed >= 4
+Requires:       python >= 2.2, python-kid >= 0.6.3, python-elementtree
 
 %description
 RepoView creates a set of static HTML pages in a yum repository for easy
@@ -31,12 +31,6 @@ sed -i -e \
 sed -i -e \
     "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
     repoview.py
-
-    
-%build
-pushd templates
-kidc *.kid
-popd
 
 
 %install

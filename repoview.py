@@ -41,9 +41,9 @@ except ImportError:
 
 from kid import Template
 ##
-# Kid generates a FutureWarning on python < 2.4
+# Kid generates a FutureWarning on python 2.3
 #
-if sys.version_info[0] == 2 and sys.version_info[1] < 4:
+if sys.version_info[0] == 2 and sys.version_info[1] == 3:
     import warnings
     warnings.filterwarnings('ignore', category=FutureWarning)
 
