@@ -2,23 +2,25 @@
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
   <title>RepoView</title>
-  <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css')}" type="text/css" />
+  <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css')}" 
+    type="text/css" />
 </head>
 <body>
     <div class="levbar">
-    <p class="pagetitle">
+      <p class="pagetitle">
         <a href="${mkLinkUrl(package.group)}"
             class="nlink"
             py:content="package.group.name"/>
-    </p>
-    <ul class="levbarlist">
-      <li py:for="pkg in package.group.getSortedList(trim=20, nevr=package.nevr)">
+      </p>
+      <ul class="levbarlist">
+        <li py:for="pkg in package.group.getSortedList(trim=20, nevr=package.nevr)">
          <a class="${pkg.nevr == package.nevr and 'nactive' or 'nlink'}"
             href="${mkLinkUrl(pkg)}"
             title="${'%s-%s-%s: %s' % (pkg.n, pkg.v, pkg.r, pkg.summary)}"
             py:content="len(pkg.n) > 20 and '%s...' % pkg.n[:17] or pkg.n"/>
       </li>
     </ul>
+
     </div>
     <div class="main">
         <p class="nav">Jump to letter: [
@@ -40,7 +42,8 @@
         </tr>
         <tr>
             <th>Release:</th><td py:content="package.r"/>
-            <th>URL:</th><td><a href="${package.url}" class="inpage"><span py:content="package.url"/></a></td>
+            <th>URL:</th><td><a href="${package.url}" class="inpage"><span
+                py:content="package.url"/></a></td>
         </tr>
         </table>
         <dl>
@@ -50,7 +53,8 @@
         <div py:for="arch in package.arches.values()">
             <h3 py:content="'Arch: ' + arch.arch"/>
             <table cellpadding="3" cellspacing="0" width="100%">
-                <tr><th>Download:</th><td><a href="${mkLinkUrl(arch)}" class="inpage" py:content="arch.getFileName()"/></td></tr>
+                <tr><th>Download:</th><td><a href="${mkLinkUrl(arch)}"
+                    class="inpage" py:content="arch.getFileName()"/></td></tr>
                 <tr><th>Build Date:</th><td py:content="arch.getTime()"/></tr>
                 <tr><th>Packager:</th><td py:content="arch.packager"/></tr>
                 <tr><th>Size:</th><td py:content="arch.getSize()"/></tr>
