@@ -71,9 +71,7 @@ h1,h2,h3,h4,h5 {
     }
 dt  {
     font-weight: bold;
-    //border-top: 1px dotted gray;
     margin-top: 1%;
-    //background-color: whitesmoke;
     }
 th  {
     background-color: whitesmoke;
