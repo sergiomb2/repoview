@@ -105,12 +105,18 @@ th  {
 .repoview {
     text-decoration: none;
     color: gray;
-    border: 1px dotted gray;
+    border-left: 1px dotted gray;
+    border-right: 1px dotted gray;
+    border-bottom: 1px dotted gray;
+    border-top: 1px none;
     font-size: small; 
     }
 .repoview:hover {
     background-color: lavender; 
-    border: 1px dotted blue;
+    border-left: 1px dotted blue;
+    border-right: 1px dotted blue;
+    border-bottom: 1px dotted blue;
+    border-top: 1px none;
     color: blue;
     font-size: small; 
     }
