@@ -33,9 +33,9 @@ browsing.
 # Fix version and default templates dir.
 #
 %{__perl} -pi -e \
-    "s/^VERSION\s*=\s*.*/VERSION = '%{version}-%{release}'/g" repoview
+    "s|^VERSION\s*=\s*.*|VERSION = '%{version}-%{release}'|g" repoview
 %{__perl} -pi -e \
-    "s/^DEFAULT_TEMPLATEDIR\s*=.*/DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'/g" \
+    "s|^DEFAULT_TEMPLATEDIR\s*=.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
     repoview
 
 #------------------------------------------------------------------------------
