@@ -50,7 +50,7 @@ grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
 
-VERSION='0.1'
+VERSION = '0.1'
 DEFAULT_TEMPLATEDIR = './templates'
 
 def _qn(tag, ns=ns_common):
