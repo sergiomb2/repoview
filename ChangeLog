@@ -1,7 +1,8 @@
 Version 0.3
 	* Fall back to silly RPM groups if no group data is found.
 	* Replace all slashes and spaces in group names to avoid breakage.
-	* Add a -l switch to provide a brief title.
+	* Add a -l switch to provide a brief title, e.g.:
+	  -l "Fedora Extras 3 x86"
 
 Version 0.2
     * Use iterparse to save a whole lotta memory
