@@ -25,21 +25,16 @@ import os
 import re
 import sys
 import time
-## 
-# Try to import cElementTree, and if that fails attempt to fall back to
-# ElementTree, a slower, but pure-python implementation.
-#
-try: 
-    import cElementTree as ElementTree
-except ImportError: 
-    from elementtree import ElementTree
-##
-# Namespace constants
-#
-ns_repo = 'http://linux.duke.edu/metadata/repo'
-ns_common = 'http://linux.duke.edu/metadata/common'
-ns_rpm = 'http://linux.duke.edu/metadata/rpm'
-ns_other = 'http://linux.duke.edu/metadata/other'
+
+try:
+    from cElementTree import iterparse
+except ImportError:
+    from elementtree.ElementTree import iterparse
+    
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 ##
 # Some hardcoded constants
 #
@@ -53,29 +48,176 @@ idxfile = 'index.html'
 VERSION = '0.2'
 DEFAULT_TEMPLATEDIR = './templates'
 
-def _qn(tag, ns=ns_common):
+##
+# Stolen from routines I wrote for yum
+#
+class MDParser:
     """
-    ElementTree expects the tags to include the namespace if xmlns
-    is provided, so this utility function converts tag+namespace into
-    {namesace}tag.
+    Main MDParser class that handles file parsing. It acts like an iterator object.
     """
-    if ns is not None:
-        return '{%s}%s' % (ns, tag)
-    else: return tag
+    def __init__(self, filename):
+        # Set up mapping of meta types to handler classes 
+        handlers = {
+            '{http://linux.duke.edu/metadata/common}metadata': PrimaryEntry,
+            '{http://linux.duke.edu/metadata/filelists}filelists': FilelistsEntry,
+            '{http://linux.duke.edu/metadata/other}otherdata': OtherEntry,
+        }
+            
+        self.total = None
+        self.count = 0
+        self._handlercls = None
 
-def _text(elem, tag, ns=ns_common):
-    """
-    A small utility function to grab all text from a childnode in the 
-    element passed as elem, matched by tagname.
-    """
-    tag = _qn(tag, ns)
-    print 'looking for tag=%s' % tag
-    try:
-        text = elem.find(tag)
-        print text
-        return text.text
-    except AttributeError:
-        return None
+        # Read in type, set package node handler and get total number of
+        # packages
+        if filename[-3:] == '.gz': fh = gzip.open(filename, 'r')
+        else: fh = open(filename, 'r')
+        parser = iterparse(fh, events=('start', 'end'))
+        self.reader = parser.__iter__()
+        event, elem = self.reader.next()
+        self._handlercls = handlers.get(elem.tag, None)
+        if not self._handlercls:
+            raise ValueError('Unknown repodata type "%s" in %s' % (
+                elem.tag, filename))
+        # Get the total number of packages
+        total = elem.get('packages', None)
+        self.total = total is None and None or int(total)
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        for event, elem in self.reader:
+            if event == 'end' and elem.tag[-7:] == 'package':
+                self.count += 1
+                return self._handlercls(elem)
+        raise StopIteration
+
+class BaseEntry:
+    def __init__(self, elem):
+        self._p = {} 
+
+    def __getitem__(self, k):
+        return self._p[k]
+
+    def keys(self):
+        return self._p.keys()
+
+    def values(self):
+        return self._p.values()
+
+    def has_key(self, k):
+        return self._p.has_key(k)
+
+    def __str__(self):
+        out = StringIO()
+        keys = self.keys()
+        keys.sort()
+        for k in keys:
+            line = u'%s=%s\n' % (k, self[k])
+            out.write(line.encode('utf8'))
+        return out.getvalue()
+
+    def _bn(self, qn):
+        return qn.split('}')[1]
+        
+    def _prefixprops(self, elem, prefix):
+        ret = {}
+        for key in elem.attrib.keys():
+            ret[prefix + '_' + key] = elem.attrib[key]
+        return ret
+
+class PrimaryEntry(BaseEntry):
+    def __init__(self, elem):
+        BaseEntry.__init__(self, elem)
+        # Avoid excess typing :)
+        p = self._p
+
+        self.prco = {}
+        self.files = {}
+
+        for child in elem:
+            name = self._bn(child.tag)
+            if name in ('name', 'arch', 'summary', 'description', 'url', 
+                    'packager'): 
+                p[name] = child.text
+
+            elif name == 'version': 
+                p.update(child.attrib)
+
+            elif name in ('time', 'size'):
+                p.update(self._prefixprops(child, name))
+
+            elif name in ('checksum', 'location'): 
+                p.update(self._prefixprops(child, name))
+                p[name + '_value'] = child.text
+            
+            elif name == 'format': 
+                self.setFormat(child)
+
+        p['pkgId'] = p['checksum_value']
+        elem.clear()
+
+    def setFormat(self, elem):
+
+        # Avoid excessive typing :)
+        p = self._p
+
+        for child in elem:
+            name = self._bn(child.tag)
+
+            if name in ('license', 'vendor', 'group', 'buildhost',
+                        'sourcerpm'):
+                p[name] = child.text
+
+            elif name in ('provides', 'requires', 'conflicts', 
+                          'obsoletes'):
+                self.prco[name] = self.getPrco(child)
+
+            elif name == 'header-range':
+                p.update(self._prefixprops(child, 'rpm_header'))
+
+            elif name == 'file':
+                type = child.get('type', 'file')
+                path = child.text
+                self.files[path] = type
+
+    def getPrco(self, elem):
+        members = []
+        for child in elem:
+            name = self._bn(child.tag)
+            members.append(child.attrib)
+        return members
+        
+        
+class FilelistsEntry(BaseEntry):
+    def __init__(self, elem):
+        BaseEntry.__init__(self, elem)
+        self._p['pkgId'] = elem.attrib['pkgid']
+        self.files = {}
+        for child in elem:
+            name = self._bn(child.tag)
+            if name == 'file':
+                type = child.get('type', 'file')
+                path = child.text
+                self.files[path] = type
+        elem.clear()
+                
+class OtherEntry(BaseEntry):
+    def __init__(self, elem):
+        BaseEntry.__init__(self, elem)
+        self._p['pkgId'] = elem.attrib['pkgid']
+        self._p['changelog'] = []
+        for child in elem:
+            name = self._bn(child.tag)
+            if name == 'changelog':
+                entry = child.attrib
+                entry['value'] = child.text
+                self._p['changelog'].append(entry)
+        elem.clear()
+
+def _bn(qn):
+    try: return qn.split('}')[1]
+    except: return qn
 
 emailre = re.compile('<.*?@.*?>')
 def _obEmail(text):
@@ -110,14 +252,18 @@ class Archer:
     all packages end up being: there are no further sublevels.
     """
     def __init__(self, elem):
-        self.arch = _text(elem, 'arch')
-        telem = elem.find(_qn('time'))
-        self.time = int(telem.get('build', '0'))
-        selem = elem.find(_qn('size'))
-        self.size = int(selem.get('package', '0'))
-        lelem = elem.find(_qn('location'))
-        self.loc = lelem.get('href', '#')
-        self.packager = _obEmail(_text(elem, 'packager'))
+        for child in elem:
+            name = _qn(child.tag)
+            if name == 'arch':
+                self.arch == child.text
+            elif name == 'time':
+                self.time = int(child.get('build', '0'))
+            elif name == 'size':
+                self.size = int(child.get('package', '0'))
+            elif name == 'location':
+                self.loc = child.get('href', '#')
+            elif name == 'packager':
+                self.packager = _obEmail(child.text)
 
     def getFileName(self):
         """
@@ -148,42 +294,33 @@ class Package:
     A bit of a misnomer -- this is "package" in the sense of repoview, not in 
     the sense of an .rpm file, since it will include multiple architectures.
     """
-    def __init__(self, n, e, v, r):
-        self.nevr = (n, e, v, r)
-        self.n = n
-        self.e = e
-        self.v = v
-        self.r = r
+    def __init__(self, pkg):
+        self.n = pkg['name']
+        self.e = pkg['epoch']
+        self.v = pkg['ver']
+        self.r = pkg['rel']
+        self.nevr = (self.n, self.e, self.v, self.r)
         self.group = None
         self.arches = {}
-        self.incomplete = 1
         self.changelogs = []
-        self.layouts = {}
+        self.summary = pkg['summary']
+        self.description = pkg['description']
+        self.url = pkg['url'] is None and '#' or pkg['url']
+        self.license = pkg['license']
+        self.vendor = pkg['vendor']
+        self.checkPackage(pkg)
     
-    def parsePackage(self, elem):
-        """
-        Takes the <package> node of primary.xml and grabs the needed info
-        from it.
-        """
-        arch = _text(elem, 'arch')
-        if self.incomplete: self._parsePrimary(elem)
-        pkgid = _text(elem, 'checksum')
+    def checkPackage(self, pkg):
+        pkgid = pkg['pkgId']
         if self.arches.has_key(pkgid): return
-        arch = Archer(elem)
+        arch = Archer(pkg)
         self.arches[pkgid] = arch
 
-    def parseOther(self, elem, limit=3):
-        """
-        Takes the <package> node of other.xml and grabs the changelogs.
-        You can override the limit of 3 by passing the limit parameter.
-        """
+    def parseOther(self, changelogs, limit=3):
         if self.changelogs: return
-        chelems = elem.findall(_qn('changelog', ns=ns_other))
-        for i, chelem in enumerate(chelems):
-            author = chelem.get('author', 'Incognito')
-            author = _obEmail(author)
-            date = int(chelem.get('date', '0'))
-            entry = chelem.text
+        
+        for changelog in changelogs:
+            ## I am here, and I am broken! ##
             self.changelogs.append([date, author, entry])
             if i >= limit-1: break
     
@@ -306,7 +443,7 @@ class RepoView:
     """
     The base class.
     """
-    def __init__(self, repodir, ignore=[], xarch=[], force=0):
+    def __init__(self, repodir, ignore=[], xarch=[], force=0, maxlatest=30):
         self.repodir = repodir
         self.ignore = ignore
         self.xarch = xarch
@@ -316,65 +453,51 @@ class RepoView:
         self.packages = {}
         self.groups = GroupFactory()
         self.letters = GroupFactory()
-        self.maxlatest = 30
-        self._parseRepoMD()
-
-    def _parseRepoMD(self):
-        """
-        Parse the repomd.xml file and figure out what to do.
-        """
+        self.maxlatest = maxlatest
+        ##
+        # Parse repomd.xml
+        #
+        self.repodata = {}
         repomd = os.path.join(self.repodir, 'repodata', 'repomd.xml')
-        tree = ElementTree.parse(repomd)
-        root = tree.getroot()
-        ## Do primary first
-        elem = self._getDataElem(root, 'primary')
-        self._checkNecessity(elem)
-        self._parsePrimary(self._getLocation(elem))
+        type = 'unknown'
+        for event, elem in iterparse(repomd, events=('start','end')):
+            if event == 'end':
+                elem.clear()
+                continue
+            tag = _bn(elem.tag)
+            if tag == 'data':
+                type = elem.get('type', 'unknown')
+                self.repodata[type] = {}
+            elif tag == 'location':
+                self.repodata[type]['location'] = elem.get('href', '#')
+            elif tag == 'checksum':
+                self.repodata[type]['checksum'] = elem.text
+        self._checkNecessity()
+        ## Do packages (primary.xml and other.xml)
+        self._parsePrimary()
+        self._parseOther()
         ## Do groups and resolve them
-        elem = self._getDataElem(root, 'group')
-        if elem is not None:
-            self._parseGroup(self._getLocation(elem))
-        ## And finally other
-        elem = self._getDataElem(root, 'other')
-        self._parseOther(self._getLocation(elem))
-        del tree
+        if self.repodata.has_key('group'):
+            self._parseGroups()
 
-    def _checkNecessity(self, elem):
+    def _checkNecessity(self):
         """
         This will look at the checksum for primary.xml and compare it to the
         one recorded during the last run in repoview/checksum. If they match,
         the program exits, unless overridden with -f.
         """
-        self.checksum = _text(elem, 'checksum', ns=ns_repo)
         if self.force: return 1
         ## Check and get the existing repoview checksum file
         try:
             chkfile = os.path.join(self.outdir, 'checksum')
             fh = open(chkfile, 'r')
-            existing = fh.read()
+            checksum = fh.read()
             fh.close()
         except IOError: return 1
-        existing = existing.strip()
-        if existing != self.checksum: return 1
+        checksum = checksum.strip()
+        if checksum != self.repodata['primary']['checksum']: return 1
         _say("RepoView: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
-
-    def _getDataElem(self, elem, type):
-        """
-        Utility to get the needed <data type="foo"> element.
-        """
-        for item in elem:
-            if item.attrib['type'] == type: return item
-        return None
-
-    def _getFileFh(self, loc):
-        """
-        Transparently handle gzipped xml files.
-        """
-        loc = os.path.join(self.repodir, loc)
-        if loc[-3:] == '.gz': fh = gzip.open(loc, 'r')
-        else: fh = open(loc, 'r')
-        return fh
 
     def _parseGroup(self, loc):
         """
@@ -384,7 +507,7 @@ class RepoView:
         fh = self._getFileFh(loc)
         namemap = self._getNameMap()
         pct = 0
-        for event, elem in ElementTree.iterparse(fh):
+        for event, elem in iterparse(fh):
             if event == 'start' and elem.tag == 'group':
                 pct += 1
                 _say('\rparsing comps: %s groups' % pct)
@@ -411,42 +534,33 @@ class RepoView:
                 namemap[name].append(package)
         return namemap
 
-    def _parsePrimary(self, loc):
+    def _parsePrimary(self):
         """
-        Utility method for parsing primary.xml.
+        Utility method for parsing primary.xml and other.xml
         """
         _say('parsing primary...', flush=1)
-        fh = self._getFileFh(loc)
         pct = 0
         ignored = 0
-        for event, elem in ElementTree.iterparse(fh, events=('start',)):
-            if elem.tag[-7:] == 'package':
-                pct += 1
-                _say('\rparsing primary: %s packages' % pct)
-                arch = _text(elem, 'arch')
-                if arch in self.xarch: 
-                    ignored += 1
-                    continue
-                if arch not in self.arches: self.arches.append(arch)
-                n = _text(elem, 'name')
-                print n
-                (e, v, r) = self._getevr(elem, ns=ns_common)
-                pkgid = self._mkpkgid(n, e, v, r)
-                if self._checkIgnore(pkgid): 
-                    ignored += 1
-                    continue
-                if self.packages.has_key(pkgid):
-                    package = self.packages[pkgid]
-                else:
-                    package = Package(n, e, v, r)
-                    package.pkgid = pkgid
-                    self.packages[pkgid] = package
-                package.parsePackage(elem)
-            elem.clear()
+        parser = MDParser(self.repodata['primary']['location'])
+        for i, pkg in enumerate(parser):
+            _say('\rparsing primary: %s packages' % pct)
+            if pkg['arch'] in self.xarch:
+                ignored += 1
+                continue
+            if pkg['arch'] not in self.arches: self.arches.append(arch)
+            pkgid = self._mkpkgid(pkg['name'], pkg['epoch'], pkg['ver'], pkg['rel'])
+            if self._checkIgnore(pkgid):
+                ignored += 1
+                continue
+            if self.packages.has_key(pkgid):
+                self.packages[pkgid].checkPackage(pkg)
+            else:
+                package = Package(pkg)
+                package.pkgid = pkgid
+                self.packages[pkgid] = package
         self.pkgcount = pct
         self.pkgignored = ignored
         _say('...done, %s ignored\n' % ignored, flush=1)
-        fh.close()
     
     def _checkIgnore(self, pkgid):
         """
