@@ -518,21 +518,21 @@ class RepoView:
         """
         This is a utility method to create the extra groups. Currently,
         the extra groups are:
-        __orphans__: groups not in any other groups
-        __latest__: the last 30 packages updated
+        __nogroup__: packages not in any other groups
+        __latest__: the last NN packages updated
         letter groups: All packages get grouped by their uppercased first 
                        letter
         Any empty groups are then removed.
         """
-        orphans = Group(grid='__orphans__', 
-                               name='Packages not in Groups')
+        nogroup = Group(grid='__nogroup__', 
+                        name='Packages not in Groups')
         latest = {}
         i = 0
         for pkgid in self.packages.keys():
             package = self.packages[pkgid]
             if package.group is None:
-                package.group = orphans
-                orphans.packages.append(package)
+                package.group = nogroup
+                nogroup.packages.append(package)
             letter = pkgid[0].upper()
             if letter not in self.letters.keys():
                 group = Group(grid=letter, name='Letter: %s' % letter)
@@ -554,13 +554,13 @@ class RepoView:
                     latest[btime] = package
             i += 1
             _say('\rcreating extra groups: %s entries' % i)
-        if orphans.packages:
-            self.groups[orphans.grid] = orphans
+        if nogroup.packages:
+            self.groups[nogroup.grid] = nogroup
         times = latest.keys()
         times.sort()
         times.reverse()
         lgroup = Group(grid='__latest__', 
-                              name='Last %s Packages Updated' % len(times))
+                       name='Last %s Packages Updated' % len(times))
         for time in times:
             lgroup.packages.append(latest[time])
         lgroup.sorted = 1
