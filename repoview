@@ -1,4 +1,6 @@
 #!/usr/bin/python -tt
+# -*- coding: utf-8 -*-
+##
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2 of the License, or
@@ -13,7 +15,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #
-# $Id$
+# $Id $
 
 import fnmatch
 import getopt
@@ -685,10 +687,11 @@ def usage(ecode=0):
     print """repoview [-i name] [-x arch] [-k dir] [-t] [-f] [-q] [repodir]
     This will make your repository browseable
     -i name
-        Optionally ignore this package -- can be shell-style glob.
-        This is useful for excluding debug packages:
+        Optionally ignore this package -- can be a shell-style glob.
+        This is useful for excluding debuginfo packages:
         -i *debuginfo* -i *doc*
-        The globbing will be done against name-e-v-r, e.g. foo-0-1.0-1
+        The globbing will be done against name-epoch-version-release, 
+        e.g. foo-0-1.0-1
     -x arch
         Optionally exclude this arch. E.g.:
         -x src -x ia64
