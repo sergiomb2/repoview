@@ -90,6 +90,14 @@ def _say(text, flush=0):
     sys.stdout.write(text)
     if flush: sys.stdout.flush()
 
+def _mkid(text):
+    """
+    Remove slashes.
+    """
+    text = text.replace('/', '.')
+    text = text.replace(' ', '')
+    return text
+
 ## Jonathan :)
 class Archer:
     """
@@ -141,6 +149,7 @@ class Package:
         self.v = v
         self.r = r
         self.group = None
+        self.rpmgroup = None
         self.arches = {}
         self.incomplete = 1
         self.changelogs = []
@@ -173,6 +182,7 @@ class Package:
         self.url = pkgdata['url']
         self.license = pkgdata['license']
         self.vendor = pkgdata['vendor']
+        self.rpmgroup = pkgdata['group']
         self.incomplete = 0
 
     def getChangeLogs(self):
@@ -350,7 +360,7 @@ class RepoView:
                 self.groups[group.grid] = group
                 group = Group()
             elif tag == 'id':
-                group.grid = _webify(elem.text)
+                group.grid = _mkid(elem.text)
             elif tag == 'name' and not elem.attrib:
                 group.name = _webify(elem.text)
             elif tag == 'description' and not elem.attrib:
@@ -403,6 +413,7 @@ class RepoView:
             'packager',
             'checksum',
             'license',
+            'group',
             'vendor')
         for event, elem in iterparse(fh):
             tag = _bn(elem.tag)
@@ -536,11 +547,24 @@ class RepoView:
                         name='Packages not in Groups')
         latest = {}
         i = 0
+        makerpmgroups = 0
+        if not len(self.groups): 
+            makerpmgroups = 1
         for pkgid in self.packages.keys():
             package = self.packages[pkgid]
             if package.group is None:
-                package.group = nogroup
-                nogroup.packages.append(package)
+                if makerpmgroups:
+                    grid = _mkid(package.rpmgroup)
+                    if grid not in self.groups.keys():
+                        group = Group(grid=grid, name=package.rpmgroup)
+                        self.groups[grid] = group
+                    else:
+                        group = self.groups[grid]
+                    package.group = group
+                    group.packages.append(package)
+                else:
+                    package.group = nogroup
+                    nogroup.packages.append(package)
             letter = pkgid[0].upper()
             if letter not in self.letters.keys():
                 group = Group(grid=letter, name='Letter: %s' % letter)
