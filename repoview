@@ -22,7 +22,7 @@ import kid
 import os
 import re
 import sys
-import times
+import time
 ## 
 # Try to import cElementTree, and if that fails attempt to fall back to
 # ElementTree, a slower, but pure-python implementation.
