@@ -26,6 +26,7 @@ import getopt
 import gzip
 import os
 import re
+import shutil
 import sys
 import time
 
@@ -574,7 +575,6 @@ class RepoView:
         Remove the existing repoview directory if it exists, and create a
         new one, copying in the layout dir from templates (if found).
         """
-        import shutil
         if os.path.isdir(self.outdir):
             _say('deleting old repoview...', 1)
             shutil.rmtree(self.outdir)
