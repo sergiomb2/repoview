@@ -50,7 +50,7 @@ grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
 
-VERSION = '0.1'
+VERSION = '0.2'
 DEFAULT_TEMPLATEDIR = './templates'
 
 def _qn(tag, ns=ns_common):
@@ -69,9 +69,11 @@ def _text(elem, tag, ns=ns_common):
     element passed as elem, matched by tagname.
     """
     tag = _qn(tag, ns)
+    print 'looking for tag=%s' % tag
     try:
-        text = elem.find(tag).text
-        return text
+        text = elem.find(tag)
+        print text
+        return text.text
     except AttributeError:
         return None
 
@@ -191,7 +193,7 @@ class Package:
         self.url = _text(elem, 'url')
         felem = elem.find(_qn('format'))
         self.license = _text(felem, 'license', ns=ns_rpm)
-        self.vendor = _text(felem, 'vendor', ns=ns_rpm)
+        self.vendor = _obEmail(_text(felem, 'vendor', ns=ns_rpm))
         self.incomplete = 0
 
     def getChangeLogs(self):
@@ -284,7 +286,7 @@ class Group:
         ## 
         # This operates under the assumption that English is always first, so
         # if another xml:lang entry is before English, expect things to be
-        # на каком-нибудь другом языке. :)
+        # weird. :)
         #
         self.name = _text(elem, 'name', ns=None)
         self.description = _text(elem, 'description', ns=None)
@@ -380,19 +382,17 @@ class RepoView:
         """
         _say('parsing comps...', flush=1)
         fh = self._getFileFh(loc)
-        tree = ElementTree.parse(fh)
         namemap = self._getNameMap()
-        root = tree.getroot()
         pct = 0
-        for elem in root:
-            if elem.tag == 'group':
+        for event, elem in ElementTree.iterparse(fh):
+            if event == 'start' and elem.tag == 'group':
                 pct += 1
                 _say('\rparsing comps: %s groups' % pct)
                 group = Group()
                 group.parseGroup(elem, namemap)
                 self.groups[group.grid] = group
+            elem.clear()
         _say('...done\n', flush=1)
-        del tree
         fh.close()
 
     def _getNameMap(self):
@@ -417,12 +417,10 @@ class RepoView:
         """
         _say('parsing primary...', flush=1)
         fh = self._getFileFh(loc)
-        tree = ElementTree.parse(fh)
-        root = tree.getroot()
         pct = 0
         ignored = 0
-        for elem in root:
-            if elem.tag == _qn('package'):
+        for event, elem in ElementTree.iterparse(fh, events=('start',)):
+            if elem.tag[-7:] == 'package':
                 pct += 1
                 _say('\rparsing primary: %s packages' % pct)
                 arch = _text(elem, 'arch')
@@ -431,6 +429,7 @@ class RepoView:
                     continue
                 if arch not in self.arches: self.arches.append(arch)
                 n = _text(elem, 'name')
+                print n
                 (e, v, r) = self._getevr(elem, ns=ns_common)
                 pkgid = self._mkpkgid(n, e, v, r)
                 if self._checkIgnore(pkgid): 
@@ -443,10 +442,10 @@ class RepoView:
                     package.pkgid = pkgid
                     self.packages[pkgid] = package
                 package.parsePackage(elem)
+            elem.clear()
         self.pkgcount = pct
         self.pkgignored = ignored
         _say('...done, %s ignored\n' % ignored, flush=1)
-        del tree
         fh.close()
     
     def _checkIgnore(self, pkgid):
@@ -464,12 +463,10 @@ class RepoView:
         """
         _say('parsing other...', flush=1)
         fh = self._getFileFh(loc)
-        tree = ElementTree.parse(fh)
-        root = tree.getroot()
         pct = 0
         ignored = 0
-        for elem in root:
-            if elem.tag == _qn('package', ns=ns_other):
+        for event, elem in ElementTree.iterparse(fh):
+            if event == 'start' and elem.tag == _qn('package', ns=ns_other):
                 pct += 1
                 _say('\rparsing other: %s packages' % pct)
                 n = elem.attrib['name']
@@ -480,8 +477,8 @@ class RepoView:
                     package.parseOther(elem)
                 else:
                     ignored += 1
+            elem.clear()
         _say('...done, %s ignored\n' % ignored, flush=1)
-        del tree
         fh.close()
             
     def _mkpkgid(self, n, e, v, r):
@@ -494,7 +491,9 @@ class RepoView:
         """
         Utility method to get e-v-r out of the <version> element.
         """
+        print elem
         velem = elem.find(_qn('version', ns=ns))
+        print velem
         e = velem.get('epoch', '0')
         v = velem.get('ver', '0')
         r = velem.get('rel', '0')
@@ -552,7 +551,7 @@ class RepoView:
         times.sort()
         times.reverse()
         lgroup = Group(grid='__latest__', 
-                              name='Last %s Packages Updated' % self.maxlatest)
+                              name='Last %s Packages Updated' % len(times))
         for time in times:
             lgroup.packages.append(latest[time])
         lgroup.sorted = 1
