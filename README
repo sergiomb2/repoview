@@ -1,3 +1,28 @@
+ABOUT:
+------
+This is a small software written to parse yum repositories and present them in a
+format that's easily browsable via http by creating a set of static HTML pages.
+
+REQUIREMENTS:
+-------------
+* ElementTree or cElementTree (recommended for faster parsing)
+* Kid templating engine (0.6.x)
+
+AUTHORS:
+--------
+Konstantin Ryabitsev <icon@duke.edu>
+
+URL:
+----
+http://www.linux.duke.edu/projects/mini/repoview
+
+COPYRIGHT AND LICENSE:
+----------------------
+This software is copyright (C) 2005 by Duke University.
+For licensing and copying information see COPYING.
+
+USAGE:
+------
 repoview [-i name] [-x arch] [-k dir] [-t] [-f] [-q] [repodir]
     This will make your repository browseable
     -i name
