@@ -102,3 +102,15 @@ th  {
     border-top: 1px dotted gray;
     color: gray;
     }
+.repoview {
+    text-decoration: none;
+    color: gray;
+    border: 1px dotted gray;
+    font-size: small; 
+    }
+.repoview:hover {
+    background-color: lavender; 
+    border: 1px dotted blue;
+    color: blue;
+    font-size: small; 
+    }

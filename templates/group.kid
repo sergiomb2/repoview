@@ -36,7 +36,11 @@
             <span py:content="pkg.summary"/>
           </li>
         </ul>
-        <p class="footernote" py:content="'Listing generated: %s' % gentime"/>
+        <p class="footernote">
+          <span py:content="'Listing generated: %s by' % gentime"/>
+          <a href="http://linux.duke.edu/projects/mini/repoview/"
+            class="repoview" py:content="'RepoView-%s' % VERSION"/>
+        </p>
     </div>
 </body>
 </html>

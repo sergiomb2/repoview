@@ -50,6 +50,9 @@ grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
 
+VERSION='0.1'
+DEFAULT_TEMPLATEDIR = './templates'
+
 def _qn(tag, ns=ns_common):
     """
     ElementTree expects the tags to include the namespace if xmlns
@@ -621,6 +624,7 @@ class RepoView:
         grtmpl.letters = self.letters
         grtmpl.groups = self.groups
         grtmpl.gentime = gentime
+        grtmpl.VERSION = VERSION
         for i, grid in enumerate(self.groups.keys()):
             _say('writing groups: %s written\r' % i)
             group = self.groups[grid]
@@ -646,6 +650,7 @@ class RepoView:
         pkgtmpl.mkLinkUrl = self.mkLinkUrl
         pkgtmpl.letters = self.letters
         pkgtmpl.gentime = gentime
+        pkgtmpl.VERSION = VERSION
         for i, pkgid in enumerate(self.packages.keys()):
             _say('writing packages: %s written\r' % i)
             package = self.packages[pkgid]
@@ -669,6 +674,7 @@ class RepoView:
         self.arches.sort()
         idxtmpl.arches = self.arches
         idxtmpl.xarch = self.xarch
+        idxtmpl.VERSION = VERSION
         if self.toplevel: out = os.path.join(self.repodir, idxfile)
         else: out = os.path.join(self.repodir, 'repodata', idxfile)
         ser = idxtmpl.serialize()
@@ -696,10 +702,11 @@ def usage(ecode=0):
         Optionally exclude this arch. E.g.:
         -x src -x ia64
     -k templatedir
-        Look in this dir for templates. The directory must contain three
-        required template files: index.kid, group.kid, package.kid and the
-        "layout" directory which will be copied into the repoview directory.
-        By default it will look in repodir/templates
+        Use an alternative directory with kid templates instead of
+        the default: %s
+        The template directory must contain three required template 
+        files: index.kid, group.kid, package.kid and the
+        "layout" dir which will be copied into the repoview directory.
     -t
         Place the index.html into the top level of the repodir, instead of 
         just in repodata/index.html.
@@ -709,7 +716,7 @@ def usage(ecode=0):
         Do not output anything except fatal erros.
     repodir
         Where to look for the 'repodata' directory.
-    """
+    """ % DEFAULT_TEMPLATEDIR
     sys.exit(ecode)
 
 def main(args):
@@ -718,7 +725,7 @@ def main(args):
     ignore = []
     xarch = []
     toplevel = 0
-    templatedir = None
+    templatedir = DEFAULT_TEMPLATEDIR
     force = 0
     try:
         gopts, cmds = getopt.getopt(args, 'i:x:k:tfqh', ['help'])
