@@ -2,3 +2,4 @@ Version 0.2
     * Use iterparse to save a whole lotta memory
     * Work with kid-0.6
     * Do not use enumerate() as that breaks on python-2.2
+    * Rename repoview into repoview.py

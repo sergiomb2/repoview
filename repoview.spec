@@ -27,10 +27,10 @@ browsing.
 # Fix version and default templates dir.
 #
 sed -i -e \
-    "s|^VERSION =.*|VERSION = '%{version}-%{release}'|g" repoview
+    "s|^VERSION =.*|VERSION = '%{version}-%{release}'|g" repoview.py
 sed -i -e \
     "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
-    repoview
+    repoview.py
 
     
 %build
@@ -44,7 +44,7 @@ rm -rf $RPM_BUILD_ROOT
 mkdir -p -m 755 \
     $RPM_BUILD_ROOT/%{_datadir}/%{name} \
     $RPM_BUILD_ROOT/%{_bindir}
-install -m 755 repoview %{buildroot}/%{_bindir}/repoview
+install -m 755 repoview.py %{buildroot}/%{_bindir}/repoview
 cp -rp templates %{buildroot}/%{_datadir}/%{name}/
 
 
