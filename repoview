@@ -1,0 +1,574 @@
+#!/usr/bin/python -tt
+import os, sys, gzip, kid, fnmatch, time, re
+import getopt
+try:
+    import cElementTree as ElementTree
+except ImportError:
+    ## Slower, but fully compatible pure-python implementation
+    from elementtree import ElementTree
+    
+ns_repo = 'http://linux.duke.edu/metadata/repo'
+ns_common = 'http://linux.duke.edu/metadata/common'
+ns_rpm = 'http://linux.duke.edu/metadata/rpm'
+ns_other = 'http://linux.duke.edu/metadata/other'
+
+pkgkid = 'package.kid'
+pkgfile = '%s.html'
+grkid = 'group.kid'
+grfile = '%s.group.html'
+idxkid = 'index.kid'
+idxfile = 'index.html'
+
+def _qn(tag, ns=ns_common):
+    if ns is not None:
+        return '{%s}%s' % (ns, tag)
+    else: return tag
+
+def _text(elem, tag, ns=ns_common):
+    tag = _qn(tag, ns)
+    try:
+        text = elem.find(tag).text
+        return text
+    except AttributeError:
+        return None
+
+emailre = re.compile('<.*?@.*?>')
+def _obEmail(text):
+    if text is None: return None
+    mo = emailre.search(text)
+    if mo:
+        email = mo.group(0)
+        remail = email.replace('.', '{*}')
+        remail = remail.replace('@', '{%}')
+        text = re.sub(email, remail, text)
+    return text
+
+quiet = 0
+def _say(text, flush=0):
+    if quiet: return
+    sys.stdout.write(text)
+    if flush: sys.stdout.flush()
+
+## Jonathan :)
+class Archer:
+    def __init__(self, elem):
+        self.arch = _text(elem, 'arch')
+        telem = elem.find(_qn('time'))
+        self.time = int(telem.get('build', '0'))
+        selem = elem.find(_qn('size'))
+        self.size = int(selem.get('package', '0'))
+        lelem = elem.find(_qn('location'))
+        self.loc = lelem.get('href', '#')
+        self.packager = _obEmail(_text(elem, 'packager'))
+
+    def getFileName(self):
+        return os.path.basename(self.loc)
+
+    def getTime(self, format='%c'):
+        return time.strftime(format, time.localtime(self.time))
+
+    def getSize(self):
+        kbsize = self.size/1024
+        if kbsize/1024 < 1:
+            return '%d KB' % kbsize
+        else:
+            return '%0.2f MB' % (float(kbsize)/1024)
+
+class Package:
+    def __init__(self, n, e, v, r):
+        self.nevr = (n, e, v, r)
+        self.n = n
+        self.e = e
+        self.v = v
+        self.r = r
+        self.group = None
+        self.arches = {}
+        self.incomplete = 1
+        self.changelogs = []
+        self.layouts = {}
+    
+    def parsePackage(self, elem):
+        arch = _text(elem, 'arch')
+        if self.incomplete: self._parsePrimary(elem)
+        pkgid = _text(elem, 'checksum')
+        if self.arches.has_key(pkgid): return
+        arch = Archer(elem)
+        self.arches[pkgid] = arch
+
+    def parseOther(self, elem, limit=3):
+        if self.changelogs: return
+        chelems = elem.findall(_qn('changelog', ns=ns_other))
+        for i, chelem in enumerate(chelems):
+            author = chelem.get('author', 'Incognito')
+            author = _obEmail(author)
+            date = int(chelem.get('date', '0'))
+            entry = chelem.text
+            self.changelogs.append([date, author, entry])
+            if i >= limit-1: break
+    
+    def _parsePrimary(self, elem):
+        self.summary = _text(elem, 'summary')
+        self.description = _text(elem, 'description')
+        self.url = _text(elem, 'url')
+        felem = elem.find(_qn('format'))
+        self.license = _text(felem, 'license', ns=ns_rpm)
+        self.vendor = _text(felem, 'vendor', ns=ns_rpm)
+        self.incomplete = 0
+
+    def getChangeLogs(self):
+        self.changelogs.sort()
+        self.changelogs.reverse()
+        retlist = []
+        for changelog in self.changelogs:
+            date, author, entry = changelog
+            date = time.strftime('%c', time.localtime(date))
+            retlist.append ([date, author, entry])
+        return retlist
+
+class GroupFactory(dict):
+    def __init__(self):
+        dict.__init__(self)
+        self.sortedlist = None
+        
+    def getSortedList(self, showinvisible=0):
+        if self.sortedlist is None:
+            grids = []
+            for grid in self.keys():
+                if self[grid].uservisible or showinvisible:
+                    grids.append(grid)
+            grids.sort()
+            self.sortedlist = []
+            for grid in grids:
+                self.sortedlist.append(self[grid])
+        return self.sortedlist
+
+class Group:
+    def __init__(self, grid=None, name=None):
+        self.packages = []
+        self.grid = grid
+        self.name = name
+        self.layouts = {}
+        self.sorted = 0
+        self.uservisible = 1
+
+    def getSortedList(self, trim=20, nevr=None):
+        if not self.sorted:
+            nevrlist = {}
+            for package in self.packages:
+                nevrlist[package.nevr] = package
+            keys = nevrlist.keys()
+            keys.sort()
+            retlist = []
+            for nevr in keys:
+                retlist.append(nevrlist[nevr])
+            self.packages = retlist
+            self.sorted = 1
+        if not trim or len(self.packages) <= trim: return self.packages
+        retlist = []
+        for i, pkg in enumerate(self.packages):
+            if pkg.nevr == nevr: break
+        half = trim/2
+        if i - half < 0:
+            return self.packages[0:trim]
+        if i + half > len(self.packages):
+            return self.packages[-trim:]
+        return self.packages[i-half:i+half]
+        
+    def parseGroup(self, elem, namemap):
+        self.grid = _text(elem, 'id', ns=None)
+        ## This operates under the assumption that English is always first.
+        self.name = _text(elem, 'name', ns=None)
+        self.description = _text(elem, 'description', ns=None)
+        uv = _text(elem, 'uservisible', ns=None)
+        if uv is not None and uv.lower() == 'true': self.uservisible = 1
+        else: self.uservisible = 0
+        pelem = elem.find('packagelist')
+        if pelem is None: return
+        for item in pelem:
+            pkgname = item.text
+            if pkgname in namemap.keys():
+                self.packages += namemap[pkgname]
+                for package in namemap[pkgname]:
+                    package.group = self
+
+class RepoView:
+    def __init__(self, repodir, ignore=[], xarch=[], force=0):
+        self.repodir = repodir
+        self.ignore = ignore
+        self.xarch = xarch
+        self.arches = []
+        self.force = force
+        self.outdir = os.path.join(self.repodir, 'repodata', 'repoview')
+        # We just want primary and other (for changelogs)
+        self.packages = {}
+        self.groups = GroupFactory()
+        self.letters = GroupFactory()
+        self.maxlatest = 30
+        self._parseRepoMD()
+
+    def _parseRepoMD(self):
+        repomd = os.path.join(self.repodir, 'repodata', 'repomd.xml')
+        tree = ElementTree.parse(repomd)
+        root = tree.getroot()
+        ## Do primary first
+        elem = self._getDataElem(root, 'primary')
+        self._checkNecessity(elem)
+        self._parsePrimary(self._getLocation(elem))
+        ## Do groups and resolve them
+        elem = self._getDataElem(root, 'group')
+        if elem is not None:
+            self._parseGroup(self._getLocation(elem))
+        ## And finally other
+        elem = self._getDataElem(root, 'other')
+        self._parseOther(self._getLocation(elem))
+        del tree
+
+    def _checkNecessity(self, elem):
+        self.checksum = _text(elem, 'checksum', ns=ns_repo)
+        if self.force: return 1
+        ## Check and get the existing repoview checksum file
+        try:
+            chkfile = os.path.join(self.outdir, 'checksum')
+            fh = open(chkfile, 'r')
+            existing = fh.read()
+            fh.close()
+        except IOError: return 1
+        existing = existing.strip()
+        if existing != self.checksum: return 1
+        _say("RepoView: Repository has not changed. Force run with -f.\n")
+        sys.exit(0)
+
+    def _getDataElem(self, elem, type):
+        for item in elem:
+            if item.attrib['type'] == type: return item
+        return None
+
+    def _getFileFh(self, loc):
+        loc = os.path.join(self.repodir, loc)
+        if loc[-3:] == '.gz': fh = gzip.open(loc, 'r')
+        else: fh = open(loc, 'r')
+        return fh
+
+    def _parseGroup(self, loc):
+        _say('parsing comps...', flush=1)
+        fh = self._getFileFh(loc)
+        tree = ElementTree.parse(fh)
+        namemap = self._getNameMap()
+        root = tree.getroot()
+        pct = 0
+        for elem in root:
+            if elem.tag == 'group':
+                pct += 1
+                _say('\rparsing comps: %s groups' % pct)
+                group = Group()
+                group.parseGroup(elem, namemap)
+                self.groups[group.grid] = group
+        _say('...done\n', flush=1)
+        del tree
+        fh.close()
+
+    def _getNameMap(self):
+        namemap = {}
+        for pkgid in self.packages.keys():
+            package = self.packages[pkgid]
+            name = package.n
+            if name not in namemap.keys(): 
+                namemap[name] = [package]
+            else:
+                namemap[name].append(package)
+        return namemap
+
+    def _parsePrimary(self, loc):
+        _say('parsing primary...', flush=1)
+        fh = self._getFileFh(loc)
+        tree = ElementTree.parse(fh)
+        root = tree.getroot()
+        pct = 0
+        ignored = 0
+        for elem in root:
+            if elem.tag == _qn('package'):
+                pct += 1
+                _say('\rparsing primary: %s packages' % pct)
+                arch = _text(elem, 'arch')
+                if arch in self.xarch: 
+                    ignored += 1
+                    continue
+                if arch not in self.arches: self.arches.append(arch)
+                n = _text(elem, 'name')
+                (e, v, r) = self._getevr(elem, ns=ns_common)
+                pkgid = self._mkpkgid(n, e, v, r)
+                if self._checkIgnore(pkgid): 
+                    ignored += 1
+                    continue
+                if self.packages.has_key(pkgid):
+                    package = self.packages[pkgid]
+                else:
+                    package = Package(n, e, v, r)
+                    package.pkgid = pkgid
+                    self.packages[pkgid] = package
+                package.parsePackage(elem)
+        self.pkgcount = pct
+        self.pkgignored = ignored
+        _say('...done, %s ignored\n' % ignored, flush=1)
+        del tree
+        fh.close()
+    
+    def _checkIgnore(self, pkgid):
+        for glob in self.ignore:
+            if fnmatch.fnmatchcase(pkgid, glob): return 1
+
+    def _parseOther(self, loc):
+        _say('parsing other...', flush=1)
+        fh = self._getFileFh(loc)
+        tree = ElementTree.parse(fh)
+        root = tree.getroot()
+        pct = 0
+        ignored = 0
+        for elem in root:
+            if elem.tag == _qn('package', ns=ns_other):
+                pct += 1
+                _say('\rparsing other: %s packages' % pct)
+                n = elem.attrib['name']
+                (e, v, r) = self._getevr(elem, ns=ns_other)
+                pkgid = self._mkpkgid(n, e, v, r)
+                if self.packages.has_key(pkgid):
+                    package = self.packages[pkgid]
+                    package.parseOther(elem)
+                else:
+                    ignored += 1
+        _say('...done, %s ignored\n' % ignored, flush=1)
+        del tree
+        fh.close()
+            
+    def _mkpkgid(self, n, e, v, r):
+        return '%s-%s-%s-%s' % (n, e, v, r)
+
+    def _getevr(self, elem, ns):
+        velem = elem.find(_qn('version', ns=ns))
+        e = velem.get('epoch', '0')
+        v = velem.get('ver', '0')
+        r = velem.get('rel', '0')
+        return (e, v, r)
+
+    def _getLocation(self, elem):
+        lelem = elem.find(_qn('location', ns=ns_repo))
+        loc = lelem.get('href', '#')
+        return loc
+
+    def _makeExtraGroups(self):
+        orphans = Group(grid='__orphans__', 
+                               name='Packages not in Groups')
+        latest = {}
+        for i, pkgid in enumerate(self.packages.keys()):
+            _say('\rcreating extra groups: %s entries' % i)
+            package = self.packages[pkgid]
+            if package.group is None:
+                package.group = orphans
+                orphans.packages.append(package)
+            letter = pkgid[0].upper()
+            if letter not in self.letters.keys():
+                group = Group(grid=letter, name='Letter: %s' % letter)
+                self.letters[letter] = group
+            self.letters[letter].packages.append(package)
+            # btime is number of seconds since epoch, so reverse logic!
+            btime = 0
+            for arch in package.arches.values():
+                if arch.time > btime: btime = arch.time
+            if len(latest.keys()) < self.maxlatest:
+                latest[btime] = package
+            else:
+                times = latest.keys()
+                times.sort()
+                times.reverse()
+                oldest = times[-1]
+                if btime > oldest:
+                    del latest[oldest]
+                    latest[btime] = package
+        if orphans.packages:
+            self.groups[orphans.grid] = orphans
+        times = latest.keys()
+        times.sort()
+        times.reverse()
+        lgroup = Group(grid='__latest__', 
+                              name='Last %s Packages Updated' % self.maxlatest)
+        for time in times:
+            lgroup.packages.append(latest[time])
+        lgroup.sorted = 1
+        self.groups[lgroup.grid] = lgroup
+        _say('...done\n', flush=1)
+        ## Prune empty groups
+        for grid in self.groups.keys():
+            if not self.groups[grid].packages: del self.groups[grid]
+
+    def _mkOutDir(self, templatedir):
+        import shutil
+        if os.path.isdir(self.outdir):
+            _say('deleting old repoview...', flush=1)
+            shutil.rmtree(self.outdir)
+            _say('done\n', flush=1)
+        os.mkdir(self.outdir)
+        layoutsrc = os.path.join(templatedir, 'layout')
+        layoutdst = os.path.join(self.outdir, 'layout')
+        if os.path.isdir(layoutsrc):
+            _say('copying layout...', flush=1)
+            shutil.copytree(layoutsrc, layoutdst)
+            _say('done\n', flush=1)
+
+    def mkLinkUrl(self, object, isindex=0):
+        link = '#'
+        prefix = ''
+        if isindex:
+            if self.toplevel: prefix = os.path.join('repodata', 'repoview')
+            else: prefix = 'repoview'
+        if object.__class__ is str:
+            if not isindex and object == idxfile:
+                if self.toplevel: link = os.path.join('..', '..', object)
+                else: link = os.path.join('..', object)
+            else:
+                link = os.path.join(prefix, object)
+        elif object.__class__ is Package:
+            link = os.path.join(prefix, pkgfile % object.pkgid)
+        elif object.__class__ is Group:
+            link = os.path.join(prefix, grfile % object.grid)
+        elif object.__class__ is Archer:
+            if isindex and self.toplevel:
+                link = os.path.join('..', object.loc)
+            else:
+                link = os.path.join('..', '..', object.loc)
+        return link
+
+    def applyTemplates(self, templatedir, toplevel=0):
+        if not self.packages:
+            _say('No packages available.')
+            sys.exit(0)
+        gentime = time.strftime('%c')
+        self.toplevel = toplevel
+        self._makeExtraGroups()
+        self._mkOutDir(templatedir)
+        ## Do groups
+        grtmpl = kid.load_template(os.path.join(templatedir, grkid))
+        grtmpl.mkLinkUrl = self.mkLinkUrl
+        grtmpl.letters = self.letters
+        grtmpl.groups = self.groups
+        grtmpl.gentime = gentime
+        for i, grid in enumerate(self.groups.keys()):
+            _say('writing groups: %s written\r' % i)
+            group = self.groups[grid]
+            grtmpl.group = group
+            ser = grtmpl.serialize()
+            out = os.path.join(self.outdir, grfile % grid)
+            fh = open(out, 'w')
+            fh.write(ser)
+            fh.close()
+        _say('\n', flush=1)
+        for i, grid in enumerate(self.letters.keys()):
+            _say('writing letter groups: %s written\r' % i)
+            group = self.letters[grid]
+            grtmpl.group = group
+            ser = grtmpl.serialize()
+            out = os.path.join(self.outdir, grfile % grid)
+            fh = open(out, 'w')
+            fh.write(ser)
+            fh.close()
+        _say('\n', flush=1)
+        ## Do packages
+        pkgtmpl = kid.load_template(os.path.join(templatedir, pkgkid))
+        pkgtmpl.mkLinkUrl = self.mkLinkUrl
+        pkgtmpl.letters = self.letters
+        pkgtmpl.gentime = gentime
+        for i, pkgid in enumerate(self.packages.keys()):
+            _say('writing packages: %s written\r' % i)
+            package = self.packages[pkgid]
+            pkgtmpl.package = package
+            ser = pkgtmpl.serialize()
+            out = os.path.join(self.outdir, pkgfile % pkgid)
+            fh = open(out, 'w')
+            fh.write(ser)
+            fh.close()
+        _say('\n', flush=1)
+        ## Do index
+        _say('generating index...', flush=1)
+        idxtmpl = kid.load_template(os.path.join(templatedir, idxkid))
+        idxtmpl.mkLinkUrl = self.mkLinkUrl
+        idxtmpl.letters = self.letters
+        idxtmpl.groups = self.groups
+        idxtmpl.gentime = gentime
+        idxtmpl.pkgcount = self.pkgcount
+        idxtmpl.pkgignored = self.pkgignored
+        idxtmpl.ignore = self.ignore
+        self.arches.sort()
+        idxtmpl.arches = self.arches
+        idxtmpl.xarch = self.xarch
+        if self.toplevel: out = os.path.join(self.repodir, idxfile)
+        else: out = os.path.join(self.repodir, 'repodata', idxfile)
+        ser = idxtmpl.serialize()
+        fh = open(out, 'w')
+        fh.write(ser)
+        fh.close()
+        _say('done\n')
+        _say('writing checksum...', flush=1)
+        chkfile = os.path.join(self.outdir, 'checksum')
+        fh = open(chkfile, 'w')
+        fh.write(self.checksum)
+        fh.close()
+        _say('done\n')
+
+def usage(ecode=0):
+    print """repoview [-i name] [-x arch] [-k dir] [-t] [-f] [-q] [repodir]
+    This will make your repository browseable
+    -i name
+        Optionally ignore this package -- can be shell-style glob.
+        This is useful for excluding debug packages:
+        -i *debuginfo* -i *doc*
+        The globbing will be done against name-e-v-r, e.g. foo-0-1.0-1
+    -x arch
+        Optionally exclude this arch. E.g.:
+        -x src -x ia64
+    -k templatedir
+        Look in this dir for templates. The directory must contain three
+        required template files: index.kid, group.kid, package.kid and the
+        "layout" directory which will be copied into the repoview directory.
+        By default it will look in repodir/templates
+    -t
+        Place the index.html into the top level of the repodir, instead of 
+        just in repodata/index.html.
+    -f
+        Regenerate the pages even if the repomd checksum hasn't changed.
+    -q
+        Do not output anything except fatal erros.
+    repodir
+        Where to look for the 'repodata' directory.
+    """
+    sys.exit(ecode)
+
+def main(args):
+    global quiet
+    if not args: usage()
+    ignore = []
+    xarch = []
+    toplevel = 0
+    templatedir = None
+    force = 0
+    try:
+        gopts, cmds = getopt.getopt(args, 'i:x:k:tfqh', ['help'])
+        if not cmds: usage(1)
+        for o,a in gopts:
+            if o == '-i': ignore.append(a)
+            elif o == '-x': xarch.append(a)
+            elif o == '-k': templatedir = a
+            elif o == '-t': toplevel = 1
+            elif o == '-f': force = 1
+            elif o == '-q': quiet = 1
+            else: usage()
+        repodir = cmds[0]
+    except getopt.error, e:
+        print "Error: %s" % e
+        usage(1)
+    if templatedir is None:
+        templatedir = os.path.join(repodir, 'templates')
+    rv = RepoView(repodir, ignore=ignore, xarch=xarch, force=force)
+    rv.applyTemplates(templatedir, toplevel=toplevel)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+    
