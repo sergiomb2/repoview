@@ -6,7 +6,7 @@
 </head>
 <body>
     <div class="levbar">
-    <p class="pagetitle">Available Groups</p>
+    <p class="pagetitle" py:content="stats['title']"/>
     <ul class="levbarlist">
       <li py:for="grp in groups.getSortedList()">
         <a class="nlink"
@@ -24,7 +24,7 @@
               href="${mkLinkUrl(letter, isindex=1)}" py:content="letter.grid"/>
           </span>]
         </p>
-        <h2>RepoView</h2>
+        <h2 py:content="stats['title']"/>
         <ul class="pkglist">
           <li>
             Indexed Packages: <span py:content="stats['pkgcount']"/>

@@ -57,7 +57,7 @@ grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
 
-VERSION = '0.2'
+VERSION = '0.3'
 DEFAULT_TEMPLATEDIR = './templates'
 
 def _bn(tag):
@@ -647,7 +647,7 @@ class RepoView:
                 link = os.path.join('..', '..', object.loc)
         return link
 
-    def applyTemplates(self, templatedir, toplevel=0):
+    def applyTemplates(self, templatedir, toplevel=0, title='RepoView'):
         """
         Just what it says. :)
         """
@@ -659,6 +659,7 @@ class RepoView:
         self._makeExtraGroups()
         self._mkOutDir(templatedir)
         stats = {
+            'title': title,
             'pkgcount': self.pkgcount,
             'pkgignored': self.pkgignored,
             'ignorelist': self.ignore,
@@ -726,7 +727,8 @@ class RepoView:
         _say('done\n')
 
 def usage(ecode=0):
-    print """repoview [-i name] [-x arch] [-k dir] [-t] [-f] [-q] [repodir]
+    print """
+    repoview [-i name] [-x arch] [-k dir] [-l title] [-t] [-f] [-q] [repodir]
     This will make your repository browseable
     -i name
         Optionally ignore this package -- can be a shell-style glob.
@@ -743,6 +745,10 @@ def usage(ecode=0):
         The template directory must contain three required template 
         files: index.kid, group.kid, package.kid and the
         "layout" dir which will be copied into the repoview directory.
+    -l title
+        Describe the repository in a few words. By default, "RepoView" is used.
+        E.g.:
+        -l "Extras for Fedora Core 3 x86"
     -t
         Place the index.html into the top level of the repodir, instead of 
         just in repodata/index.html.
@@ -762,14 +768,16 @@ def main(args):
     xarch = []
     toplevel = 0
     templatedir = DEFAULT_TEMPLATEDIR
+    title = 'RepoView'
     force = 0
     try:
-        gopts, cmds = getopt.getopt(args, 'i:x:k:tfqh', ['help'])
+        gopts, cmds = getopt.getopt(args, 'i:x:k:l:tfqh', ['help'])
         if not cmds: usage(1)
-        for o,a in gopts:
+        for o, a in gopts:
             if o == '-i': ignore.append(a)
             elif o == '-x': xarch.append(a)
             elif o == '-k': templatedir = a
+            elif o == '-l': title = a
             elif o == '-t': toplevel = 1
             elif o == '-f': force = 1
             elif o == '-q': quiet = 1
@@ -781,7 +789,7 @@ def main(args):
     if templatedir is None:
         templatedir = os.path.join(repodir, 'templates')
     rv = RepoView(repodir, ignore=ignore, xarch=xarch, force=force)
-    rv.applyTemplates(templatedir, toplevel=toplevel)
+    rv.applyTemplates(templatedir, toplevel=toplevel, title=title)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

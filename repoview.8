@@ -4,7 +4,7 @@
 \fBrepoview\fR \- Make YUM repositories browseable
 
 .SH SYNOPSIS
-\fBrepoview\fR [\-i name] [\-x arch] [\-k dir] [\-t] [\-f] [\-q] repodir
+\fBrepoview\fR [\-i name] [\-x arch] [\-k dir] [\-l title] [\-t] [\-f] [\-q] repodir
 
 .SH DESCRIPTION
 RepoView allows one to easily create a set of static HTML pages in a 
@@ -34,6 +34,12 @@ default: ./templates. The template directory must contain three
 required template files: index.kid, group.kid, package.kid and 
 the "layout" dir which will be copied into the repoview directory.
 .TP
+.B \-l title
+Describe the repository in a few words. By default "RepoView" is used. 
+E.g.:
+.br
+-l "Extras for Fedora Core 3 x86"
+.TP
 .B \-t
 Place the index.html into the top level of the repodir, instead of
 just in repodata/index.html.
@@ -59,7 +65,7 @@ The simplest invocation is:
 .LP 
 .B repoview /path/to/repository
 .br
-.B repoview -k /path/to/templates /path/to/repository
+.B repoview -l "Fedora Extras 3 ix86" /path/to/repository
 .LP 
 When running from cron, you want to use the \-q switch:
 .LP 

@@ -1,7 +1,7 @@
 # $Id$
 
 Name:           repoview
-Version:        0.2
+Version:        0.3
 Release:        1
 Epoch:          0
 Summary:        Creates a set of static HTML pages in a yum repository.
@@ -56,6 +56,9 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
+* Fri Mar 25 2005 Konstantin Ryabitsev <icon@linux.duke.edu> 0.3-1
+- Version 0.3
+
 * Thu Mar 10 2005 Konstantin Ryabitsev <icon@linux.duke.edu> 0.2-1
 - Version 0.2
 - Fix URL

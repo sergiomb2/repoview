@@ -9,7 +9,7 @@
     <p class="pagetitle">
         <a href="${mkLinkUrl('index.html')}" 
         title="Back to the index page"
-        class="nlink">Available Groups</a>
+        class="nlink" py:content="stats['title']"/>
     </p>
     <ul class="levbarlist">
       <li py:for="grp in groups.getSortedList()">
