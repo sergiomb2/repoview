@@ -641,7 +641,9 @@ class RepoView:
                 letters=self.letters, groups=self.groups,
                 gentime=gentime, VERSION=VERSION, group=group)
             out = os.path.join(self.outdir, grfile % grid)
-            kid.write(out)
+            fh = open(out, 'w')
+            kid.write(fh)
+            fh.close()
             i += 1
             _say('writing groups: %s written\r' % i)
         _say('\n', 1)
@@ -653,7 +655,9 @@ class RepoView:
                 letters=self.letters, groups=self.groups,
                 gentime=gentime, VERSION=VERSION, group=group)
             out = os.path.join(self.outdir, grfile % grid)
-            kid.write(out)
+            fh = open(out, 'w')
+            kid.write(fh)
+            fh.close()
             i += 1
             _say('writing letter groups: %s written\r' % i)
         _say('\n', 1)
@@ -666,7 +670,9 @@ class RepoView:
                 letters=self.letters, package=package,
                 gentime=gentime, VERSION=VERSION)
             out = os.path.join(self.outdir, pkgfile % pkgid)
-            kid.write(out)
+            fh = open(out, 'w')
+            kid.write(fh)
+            fh.close()
             i += 1
             _say('writing packages: %s written\r' % i)
         _say('\n', 1)
@@ -681,7 +687,9 @@ class RepoView:
             VERSION=VERSION, gentime=gentime)
         if self.toplevel: out = os.path.join(self.repodir, idxfile)
         else: out = os.path.join(self.repodir, 'repodata', idxfile)
+        fh = open(out, 'w')
         kid.write(out)
+        fh.close()
         _say('done\n')
         _say('writing checksum...', 1)
         chkfile = os.path.join(self.outdir, 'checksum')

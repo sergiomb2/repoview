@@ -33,6 +33,12 @@ sed -i -e \
     repoview.py
 
 
+%build
+pushd templates
+kidc *.kid
+popd
+
+
 %install
 rm -rf $RPM_BUILD_ROOT
 mkdir -p -m 755                         \
