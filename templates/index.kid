@@ -27,20 +27,18 @@
         <h2>RepoView</h2>
         <ul class="pkglist">
           <li>
-            Total Packages: 
-            <span py:content="pkgcount"/>
-            <span py:if="pkgignored">
-              (<span py:content="pkgignored"/> ignored:
-              <span py:content="', '.join(ignore)"/>)
-            </span>
+            Indexed Packages: <span py:content="stats['pkgcount']"/>
           </li>
           <li>
             Available Architectures: 
-            <span py:content="', '.join(arches)"/>
-            <span py:if="len(xarch)">
-              (<span py:content="len(xarch)"/> ignored:
-              <span py:content="', '.join(xarch)"/>)
-            </span>
+            <span py:content="', '.join(stats['archlist'])"/>
+          </li>
+          <li py:if="stats['pkgignored']">
+            Ignored Packages: <span py:content="stats['pkgignored']"/>
+            (by name: 
+            <span py:content="stats['ignorelist'] and ', '.join(stats['ignorelist']) or 'none'"/>;
+            by arch:
+            <span py:content="stats['ignorearchlist'] and ', '.join(stats['ignorearchlist']) or 'none'"/>)
           </li>
           <li>
             Total groups: <span py:content="len(groups.keys())"/>
@@ -62,9 +60,9 @@
           </li>
         </ul>
         <p class="footernote">
-          <span py:content="'Listing generated: %s by' % gentime"/>
+          <span py:content="'Listing generated: %s by' % stats['gentime']"/>
           <a href="http://linux.duke.edu/projects/mini/repoview/"
-            class="repoview" py:content="'RepoView-%s' % VERSION"/>
+            class="repoview" py:content="'RepoView-%s' % stats['VERSION']"/>
         </p>
     </div>
 </body>

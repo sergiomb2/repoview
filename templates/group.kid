@@ -37,9 +37,9 @@
           </li>
         </ul>
         <p class="footernote">
-          <span py:content="'Listing generated: %s by' % gentime"/>
+          <span py:content="'Listing generated: %s by' % stats['gentime']"/>
           <a href="http://linux.duke.edu/projects/mini/repoview/"
-            class="repoview" py:content="'RepoView-%s' % VERSION"/>
+            class="repoview" py:content="'RepoView-%s' % stats['VERSION']"/>
         </p>
     </div>
 </body>

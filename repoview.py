@@ -423,7 +423,7 @@ class RepoView:
             elif tag == 'location':
                 pkgdata['location'] = elem.get('href', '#')
             elem.clear()
-        self.pkgcount = pct
+        self.pkgcount = pct - ignored
         self.pkgignored = ignored
         _say('...done\n', 1)
         fh.close()
@@ -436,6 +436,8 @@ class RepoView:
         """
         if not pkgdata: return 0
         if pkgdata['arch'] in self.xarch: return 0
+        if pkgdata['arch'] not in self.arches: 
+            self.arches.append(pkgdata['arch'])
         ## We make a package here from pkgdata ##
         (n, e, v, r) = (pkgdata['name'], pkgdata['epoch'], 
                         pkgdata['ver'], pkgdata['rel'])
@@ -632,17 +634,25 @@ class RepoView:
         self.toplevel = toplevel
         self._makeExtraGroups()
         self._mkOutDir(templatedir)
+        stats = {
+            'pkgcount': self.pkgcount,
+            'pkgignored': self.pkgignored,
+            'ignorelist': self.ignore,
+            'archlist': self.arches,
+            'ignorearchlist': self.xarch,
+            'VERSION': VERSION,
+            'gentime': gentime
+            }
         ## Do groups
         grtmpl = os.path.join(templatedir, grkid)
+        kobj = Template(file=grtmpl, mkLinkUrl=self.mkLinkUrl,
+                letters=self.letters, groups=self.groups, stats=stats)
         i = 0
         for grid in self.groups.keys():            
-            group = self.groups[grid]
-            kid = Template(file=grtmpl, mkLinkUrl=self.mkLinkUrl,
-                letters=self.letters, groups=self.groups,
-                gentime=gentime, VERSION=VERSION, group=group)
+            kobj.group = self.groups[grid]
             out = os.path.join(self.outdir, grfile % grid)
             fh = open(out, 'w')
-            kid.write(fh)
+            kobj.write(fh)
             fh.close()
             i += 1
             _say('writing groups: %s written\r' % i)
@@ -650,13 +660,10 @@ class RepoView:
         ## Do letter groups
         i = 0
         for grid in self.letters.keys():
-            group = self.letters[grid]
-            kid = Template(file=grtmpl, mkLinkUrl=self.mkLinkUrl,
-                letters=self.letters, groups=self.groups,
-                gentime=gentime, VERSION=VERSION, group=group)
+            kobj.group = self.letters[grid]
             out = os.path.join(self.outdir, grfile % grid)
             fh = open(out, 'w')
-            kid.write(fh)
+            kobj.write(fh)
             fh.close()
             i += 1
             _say('writing letter groups: %s written\r' % i)
@@ -664,14 +671,13 @@ class RepoView:
         ## Do packages
         i = 0
         pkgtmpl = os.path.join(templatedir, pkgkid)
+        kobj = Template(file=pkgtmpl, mkLinkUrl=self.mkLinkUrl,
+                letters=self.letters, stats=stats)
         for pkgid in self.packages.keys():
-            package = self.packages[pkgid]
-            kid = Template(file=pkgtmpl, mkLinkUrl=self.mkLinkUrl,
-                letters=self.letters, package=package,
-                gentime=gentime, VERSION=VERSION)
+            kobj.package = self.packages[pkgid]
             out = os.path.join(self.outdir, pkgfile % pkgid)
             fh = open(out, 'w')
-            kid.write(fh)
+            kobj.write(fh)
             fh.close()
             i += 1
             _say('writing packages: %s written\r' % i)
@@ -680,15 +686,12 @@ class RepoView:
         _say('generating index...', 1)
         idxtmpl = os.path.join(templatedir, idxkid)
         self.arches.sort()
-        kid = Template(file=idxtmpl, mkLinkUrl=self.mkLinkUrl,
-            letters=self.letters, groups=self.groups,
-            pkgcount=self.pkgcount, pkgignored=self.pkgignored,
-            ignore=self.ignore, arches=self.arches, xarch=self.xarch,
-            VERSION=VERSION, gentime=gentime)
+        kobj = Template(file=idxtmpl, mkLinkUrl=self.mkLinkUrl,
+            letters=self.letters, groups=self.groups, stats=stats)
         if self.toplevel: out = os.path.join(self.repodir, idxfile)
         else: out = os.path.join(self.repodir, 'repodata', idxfile)
         fh = open(out, 'w')
-        kid.write(out)
+        kobj.write(out)
         fh.close()
         _say('done\n')
         _say('writing checksum...', 1)

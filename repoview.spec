@@ -32,13 +32,6 @@ sed -i -e \
     "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
     repoview.py
 
-
-%build
-pushd templates
-kidc *.kid
-popd
-
-
 %install
 rm -rf $RPM_BUILD_ROOT
 mkdir -p -m 755                         \
