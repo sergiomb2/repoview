@@ -246,8 +246,10 @@ class Group:
             self.sorted = 1
         if not trim or len(self.packages) <= trim: return self.packages
         retlist = []
-        for i, pkg in enumerate(self.packages):
+        i = 0
+        for pkg in self.packages:
             if pkg.nevr == nevr: break
+            i += 1
         half = trim/2
         if i - half < 0:
             return self.packages[0:trim]
