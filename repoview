@@ -1,17 +1,46 @@
 #!/usr/bin/python -tt
-import os, sys, gzip, kid, fnmatch, time, re
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Library General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+# $Id$
+
+import fnmatch
 import getopt
-try:
+import gzip
+import kid
+import os
+import re
+import sys
+import times
+## 
+# Try to import cElementTree, and if that fails attempt to fall back to
+# ElementTree, a slower, but pure-python implementation.
+#
+try: 
     import cElementTree as ElementTree
-except ImportError:
-    ## Slower, but fully compatible pure-python implementation
+except ImportError: 
     from elementtree import ElementTree
-    
+##
+# Namespace constants
+#
 ns_repo = 'http://linux.duke.edu/metadata/repo'
 ns_common = 'http://linux.duke.edu/metadata/common'
 ns_rpm = 'http://linux.duke.edu/metadata/rpm'
 ns_other = 'http://linux.duke.edu/metadata/other'
-
+##
+# Some hardcoded constants
+#
 pkgkid = 'package.kid'
 pkgfile = '%s.html'
 grkid = 'group.kid'
@@ -20,11 +49,20 @@ idxkid = 'index.kid'
 idxfile = 'index.html'
 
 def _qn(tag, ns=ns_common):
+    """
+    ElementTree expects the tags to include the namespace if xmlns
+    is provided, so this utility function converts tag+namespace into
+    {namesace}tag.
+    """
     if ns is not None:
         return '{%s}%s' % (ns, tag)
     else: return tag
 
 def _text(elem, tag, ns=ns_common):
+    """
+    A small utility function to grab all text from a childnode in the 
+    element passed as elem, matched by tagname.
+    """
     tag = _qn(tag, ns)
     try:
         text = elem.find(tag).text
@@ -34,6 +72,10 @@ def _text(elem, tag, ns=ns_common):
 
 emailre = re.compile('<.*?@.*?>')
 def _obEmail(text):
+    """
+    Make spambots' life more difficult by obfuscating all email addresses,
+    since RPM metadata is ripe with them.
+    """
     if text is None: return None
     mo = emailre.search(text)
     if mo:
@@ -45,12 +87,21 @@ def _obEmail(text):
 
 quiet = 0
 def _say(text, flush=0):
+    """
+    Unless in quiet mode, output the text passed.
+    """
     if quiet: return
     sys.stdout.write(text)
     if flush: sys.stdout.flush()
 
 ## Jonathan :)
 class Archer:
+    """
+    This class handles all possible architectures for a package, since
+    the listing is done by n-e-v-r.html, and a single release can have more
+    than one architecture available, e.g. "src". This is effectively where
+    all packages end up being: there are no further sublevels.
+    """
     def __init__(self, elem):
         self.arch = _text(elem, 'arch')
         telem = elem.find(_qn('time'))
@@ -62,19 +113,34 @@ class Archer:
         self.packager = _obEmail(_text(elem, 'packager'))
 
     def getFileName(self):
+        """
+        Get the basename of the RPM file in question.
+        """
         return os.path.basename(self.loc)
 
     def getTime(self, format='%c'):
+        """
+        Return the build time of this package in locale format, unless
+        passed as format='strformat'.
+        """
         return time.strftime(format, time.localtime(self.time))
 
     def getSize(self):
+        """
+        You can access the byte size of the package by looking at arch.size,
+        but this will return the size in sane units (KiB or MiB).
+        """
         kbsize = self.size/1024
         if kbsize/1024 < 1:
-            return '%d KB' % kbsize
+            return '%d KiB' % kbsize
         else:
-            return '%0.2f MB' % (float(kbsize)/1024)
+            return '%0.2f MiB' % (float(kbsize)/1024)
 
 class Package:
+    """
+    A bit of a misnomer -- this is "package" in the sense of repoview, not in 
+    the sense of an .rpm file, since it will include multiple architectures.
+    """
     def __init__(self, n, e, v, r):
         self.nevr = (n, e, v, r)
         self.n = n
@@ -88,6 +154,10 @@ class Package:
         self.layouts = {}
     
     def parsePackage(self, elem):
+        """
+        Takes the <package> node of primary.xml and grabs the needed info
+        from it.
+        """
         arch = _text(elem, 'arch')
         if self.incomplete: self._parsePrimary(elem)
         pkgid = _text(elem, 'checksum')
@@ -96,6 +166,10 @@ class Package:
         self.arches[pkgid] = arch
 
     def parseOther(self, elem, limit=3):
+        """
+        Takes the <package> node of other.xml and grabs the changelogs.
+        You can override the limit of 3 by passing the limit parameter.
+        """
         if self.changelogs: return
         chelems = elem.findall(_qn('changelog', ns=ns_other))
         for i, chelem in enumerate(chelems):
@@ -116,6 +190,9 @@ class Package:
         self.incomplete = 0
 
     def getChangeLogs(self):
+        """
+        Get the changelogs in the [c-formatted date, author, entry] style.
+        """
         self.changelogs.sort()
         self.changelogs.reverse()
         retlist = []
@@ -126,11 +203,19 @@ class Package:
         return retlist
 
 class GroupFactory(dict):
+    """
+    A small utility class that extends the dict functionality to aide in
+    kid template generation. It contains the groups, keyed by group id.
+    """
     def __init__(self):
         dict.__init__(self)
         self.sortedlist = None
         
     def getSortedList(self, showinvisible=0):
+        """
+        Get the sorted list of groups. The sorting is done by group id 
+        in ascending order (locale-specific).
+        """
         if self.sortedlist is None:
             grids = []
             for grid in self.keys():
@@ -143,15 +228,25 @@ class GroupFactory(dict):
         return self.sortedlist
 
 class Group:
+    """
+    Contains a list of packages.
+    """
     def __init__(self, grid=None, name=None):
         self.packages = []
         self.grid = grid
         self.name = name
-        self.layouts = {}
         self.sorted = 0
         self.uservisible = 1
 
-    def getSortedList(self, trim=20, nevr=None):
+    def getSortedList(self, trim=0, nevr=None):
+        """
+        A utility method for calling from kid templates. This will
+        return a sorted list of packages, optionally trimmed since
+        on large repositories this list can be very large, and makes
+        the display useless. If you pass the trim parameter, you must
+        pass the nevr parameter, too, so the it knows around which package
+        to trim.
+        """
         if not self.sorted:
             nevrlist = {}
             for package in self.packages:
@@ -175,8 +270,17 @@ class Group:
         return self.packages[i-half:i+half]
         
     def parseGroup(self, elem, namemap):
+        """
+        Takes a <group> element from comps.xml and takes the needed
+        information from it. Since comps is ordered by package name,
+        namemap is required to map name to actual packages.
+        """
         self.grid = _text(elem, 'id', ns=None)
-        ## This operates under the assumption that English is always first.
+        ## 
+        # This operates under the assumption that English is always first, so
+        # if another xml:lang entry is before English, expect things to be
+        # на каком-нибудь другом языке. :)
+        #
         self.name = _text(elem, 'name', ns=None)
         self.description = _text(elem, 'description', ns=None)
         uv = _text(elem, 'uservisible', ns=None)
@@ -192,6 +296,9 @@ class Group:
                     package.group = self
 
 class RepoView:
+    """
+    The base class.
+    """
     def __init__(self, repodir, ignore=[], xarch=[], force=0):
         self.repodir = repodir
         self.ignore = ignore
@@ -199,7 +306,6 @@ class RepoView:
         self.arches = []
         self.force = force
         self.outdir = os.path.join(self.repodir, 'repodata', 'repoview')
-        # We just want primary and other (for changelogs)
         self.packages = {}
         self.groups = GroupFactory()
         self.letters = GroupFactory()
@@ -207,6 +313,9 @@ class RepoView:
         self._parseRepoMD()
 
     def _parseRepoMD(self):
+        """
+        Parse the repomd.xml file and figure out what to do.
+        """
         repomd = os.path.join(self.repodir, 'repodata', 'repomd.xml')
         tree = ElementTree.parse(repomd)
         root = tree.getroot()
@@ -224,6 +333,11 @@ class RepoView:
         del tree
 
     def _checkNecessity(self, elem):
+        """
+        This will look at the checksum for primary.xml and compare it to the
+        one recorded during the last run in repoview/checksum. If they match,
+        the program exits, unless overridden with -f.
+        """
         self.checksum = _text(elem, 'checksum', ns=ns_repo)
         if self.force: return 1
         ## Check and get the existing repoview checksum file
@@ -235,21 +349,30 @@ class RepoView:
         except IOError: return 1
         existing = existing.strip()
         if existing != self.checksum: return 1
-        _say("RepoView: Repository has not changed. Force run with -f.\n")
+        _say("RepoView: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
 
     def _getDataElem(self, elem, type):
+        """
+        Utility to get the needed <data type="foo"> element.
+        """
         for item in elem:
             if item.attrib['type'] == type: return item
         return None
 
     def _getFileFh(self, loc):
+        """
+        Transparently handle gzipped xml files.
+        """
         loc = os.path.join(self.repodir, loc)
         if loc[-3:] == '.gz': fh = gzip.open(loc, 'r')
         else: fh = open(loc, 'r')
         return fh
 
     def _parseGroup(self, loc):
+        """
+        Utility method for parsing comps.xml.
+        """
         _say('parsing comps...', flush=1)
         fh = self._getFileFh(loc)
         tree = ElementTree.parse(fh)
@@ -268,6 +391,11 @@ class RepoView:
         fh.close()
 
     def _getNameMap(self):
+        """
+        Needed for group parsing: since only package names are listed in
+        <comps>, this maps names to package objects. The result is in the
+        format: {'pkgname': [pkgobject1, pkgobject2, ...]}.
+        """
         namemap = {}
         for pkgid in self.packages.keys():
             package = self.packages[pkgid]
@@ -279,6 +407,9 @@ class RepoView:
         return namemap
 
     def _parsePrimary(self, loc):
+        """
+        Utility method for parsing primary.xml.
+        """
         _say('parsing primary...', flush=1)
         fh = self._getFileFh(loc)
         tree = ElementTree.parse(fh)
@@ -314,10 +445,17 @@ class RepoView:
         fh.close()
     
     def _checkIgnore(self, pkgid):
+        """
+        Check if package id (n-e-v-r) matches the ignore globs passed
+        via -i.
+        """
         for glob in self.ignore:
             if fnmatch.fnmatchcase(pkgid, glob): return 1
 
     def _parseOther(self, loc):
+        """
+        Utility method to parse other.xml.
+        """
         _say('parsing other...', flush=1)
         fh = self._getFileFh(loc)
         tree = ElementTree.parse(fh)
@@ -341,9 +479,15 @@ class RepoView:
         fh.close()
             
     def _mkpkgid(self, n, e, v, r):
+        """
+        Make the n-e-v-r package id out of n, e, v, r.
+        """
         return '%s-%s-%s-%s' % (n, e, v, r)
 
     def _getevr(self, elem, ns):
+        """
+        Utility method to get e-v-r out of the <version> element.
+        """
         velem = elem.find(_qn('version', ns=ns))
         e = velem.get('epoch', '0')
         v = velem.get('ver', '0')
@@ -351,11 +495,23 @@ class RepoView:
         return (e, v, r)
 
     def _getLocation(self, elem):
+        """
+        Find the location of the package in the <package> node.
+        """
         lelem = elem.find(_qn('location', ns=ns_repo))
         loc = lelem.get('href', '#')
         return loc
 
     def _makeExtraGroups(self):
+        """
+        This is a utility method to create the extra groups. Currently,
+        the extra groups are:
+        __orphans__: groups not in any other groups
+        __latest__: the last 30 packages updated
+        letter groups: All packages get grouped by their uppercased first 
+                       letter
+        Any empty groups are then removed.
+        """
         orphans = Group(grid='__orphans__', 
                                name='Packages not in Groups')
         latest = {}
@@ -401,6 +557,10 @@ class RepoView:
             if not self.groups[grid].packages: del self.groups[grid]
 
     def _mkOutDir(self, templatedir):
+        """
+        Remove the existing repoview directory if it exists, and create a
+        new one, copying in the layout dir from templates (if found).
+        """
         import shutil
         if os.path.isdir(self.outdir):
             _say('deleting old repoview...', flush=1)
@@ -415,6 +575,11 @@ class RepoView:
             _say('done\n', flush=1)
 
     def mkLinkUrl(self, object, isindex=0):
+        """
+        This is a utility method passed to kid templates. The templates use 
+        it to get the link to a package, group, or layout object without
+        having to figure things out on their own.
+        """
         link = '#'
         prefix = ''
         if isindex:
@@ -438,6 +603,9 @@ class RepoView:
         return link
 
     def applyTemplates(self, templatedir, toplevel=0):
+        """
+        Just what it says. :)
+        """
         if not self.packages:
             _say('No packages available.')
             sys.exit(0)
@@ -571,4 +739,3 @@ def main(args):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
-    
