@@ -456,6 +456,7 @@ class RepoView:
         """
         for glob in self.ignore:
             if fnmatch.fnmatchcase(pkgid, glob): return 1
+        return 0
 
     def _parseOther(self, loc):
         """
