@@ -1,16 +1,9 @@
 # $Id$
 
-%define _pyver   %(python -c 'import sys; print sys.version[:3],')
-
-%define _python  %{_bindir}/python%{_pyver}
-%define _pydir   %{_libdir}/python%{_pyver}/site-packages
-
-#------------------------------------------------------------------------------
-
 Summary:        Creates a set of static HTML pages in a yum repository.
 Name:           repoview
 Version:        0.1
-Release:        1.%{_pyver}
+Release:        1
 Epoch:          0
 License:        GPL
 Group:          Applications/System
@@ -18,8 +11,8 @@ Source:         http://linux.duke.edu/projects/mini/%{name}/download/%{name}-%{v
 URL:            http://linux.duke.edu/projects/%{name}
 BuildRoot:      %{_tmppath}/%{name}-%{version}-root
 BuildArch:      noarch
-BuildPrereq:    %{_python}, perl
-Requires:       %{_python}, kid = 0.5, elementtree
+BuildPrereq:    sed
+Requires:       python >= 2.2, kid >= 0.5, kid < 0.6, elementtree
 
 %description
 RepoView creates a set of static HTML pages in a yum repository for easy
@@ -32,10 +25,10 @@ browsing.
 ##
 # Fix version and default templates dir.
 #
-%{__perl} -pi -e \
-    "s|^VERSION\s*=\s*.*|VERSION = '%{version}-%{release}'|g" repoview
-%{__perl} -pi -e \
-    "s|^DEFAULT_TEMPLATEDIR\s*=.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
+%{__sed} -i -e \
+    "s|^VERSION =.*|VERSION = '%{version}-%{release}'|g" repoview
+%{__sed} -i -e \
+    "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
     repoview
 
 #------------------------------------------------------------------------------
