@@ -272,6 +272,10 @@ class RepoView:
         self.maxlatest = maxlatest
         self.repodata = {}
         repomd = os.path.join(self.repodir, 'repodata', 'repomd.xml')
+        if not os.access(repomd, os.R_OK):
+            sys.stderr.write('Not found: %s\n' % repomd)
+            sys.stderr.write('Does not look like a repository. Exiting.\n')
+            sys.exit(1)
         self._parseRepoMD(repomd)
         ## Do packages (primary.xml and other.xml)
         self._parsePrimary()

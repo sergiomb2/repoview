@@ -13,8 +13,8 @@ Source0:        http://linux.duke.edu/projects/mini/%{name}/download/%{name}-%{v
 BuildRoot:      %{_tmppath}/%{name}-%{version}-root
 BuildArch:      noarch
 
-BuildRequires:  sed >= 4, kid >= 0.6
-Requires:       python >= 2.2, kid >= 0.6, python-elementtree
+BuildRequires:  sed >= 4, python-kid >= 0.6
+Requires:       python >= 2.2, python-kid >= 0.6, python-elementtree
 
 %description
 RepoView creates a set of static HTML pages in a yum repository for easy
@@ -41,11 +41,13 @@ popd
 
 %install
 rm -rf $RPM_BUILD_ROOT
-mkdir -p -m 755 \
+mkdir -p -m 755                         \
     $RPM_BUILD_ROOT/%{_datadir}/%{name} \
-    $RPM_BUILD_ROOT/%{_bindir}
-install -m 755 repoview.py %{buildroot}/%{_bindir}/repoview
-cp -rp templates %{buildroot}/%{_datadir}/%{name}/
+    $RPM_BUILD_ROOT/%{_bindir}          \
+    $RPM_BUILD_ROOT/%{_mandir}/man8
+install -m 755 repoview.py  $RPM_BUILD_ROOT/%{_bindir}/repoview
+install -m 644 repoview.8   $RPM_BUILD_ROOT/%{_mandir}/man8/
+cp -rp templates            $RPM_BUILD_ROOT/%{_datadir}/%{name}/
 
 
 %clean
@@ -57,6 +59,7 @@ rm -rf $RPM_BUILD_ROOT
 %doc README COPYING ChangeLog
 %{_datadir}/%{name}
 %{_bindir}/*
+%{_mandir}/man*/*
 
 
 %changelog
@@ -64,6 +67,7 @@ rm -rf $RPM_BUILD_ROOT
 - Version 0.2
 - Fix URL
 - Comply with fedora extras specfile format.
+- Depend on python-elementtree and python-kid -- the names in extras.
 
 * Thu Mar 03 2005 Konstantin Ryabitsev <icon@linux.duke.edu> 0.1-1
 - Initial build

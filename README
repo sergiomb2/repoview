@@ -23,30 +23,4 @@ For licensing and copying information see COPYING.
 
 USAGE:
 ------
-repoview [-i name] [-x arch] [-k dir] [-t] [-f] [-q] [repodir]
-    This will make your repository browseable
-    -i name
-        Optionally ignore this package -- can be a shell-style glob.
-        This is useful for excluding debuginfo packages:
-        -i *debuginfo* -i *doc*
-        The globbing will be done against name-epoch-version-release, 
-        e.g. foo-0-1.0-1
-    -x arch
-        Optionally exclude this arch. E.g.:
-        -x src -x ia64
-    -k templatedir
-        Use an alternative directory with kid templates instead of
-        the default: ./templates
-        The template directory must contain three required template 
-        files: index.kid, group.kid, package.kid and the
-        "layout" dir which will be copied into the repoview directory.
-    -t
-        Place the index.html into the top level of the repodir, instead of 
-        just in repodata/index.html.
-    -f
-        Regenerate the pages even if the repomd checksum hasn't changed.
-    -q
-        Do not output anything except fatal erros.
-    repodir
-        Where to look for the 'repodata' directory.
-    
+See repoview(8) or repoview --help.

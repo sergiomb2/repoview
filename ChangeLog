@@ -4,3 +4,5 @@ Version 0.2
     * Do not use enumerate() as that breaks on python-2.2
     * Rename repoview into repoview.py
     * Rename __orphans__ to __nogroup__
+    * Add a simple manpage
+    * Check for repomd.xml before trying to parse it
