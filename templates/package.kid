@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
-  <title>RepoView</title>
+  <title py:content="'RepoView: %s' % stats['title']"/>
   <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css')}" 
     type="text/css" />
 </head>
