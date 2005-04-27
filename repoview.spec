@@ -13,7 +13,6 @@ Source0:        http://linux.duke.edu/projects/mini/%{name}/download/%{name}-%{v
 BuildRoot:      %{_tmppath}/%{name}-%{version}-root
 BuildArch:      noarch
 
-BuildRequires:  sed >= 4
 Requires:       python >= 2.2, python-kid >= 0.6.3, python-elementtree
 
 %description

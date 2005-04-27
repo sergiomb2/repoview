@@ -1,5 +1,8 @@
 #!/usr/bin/python -tt
-# -*- coding: utf-8 -*-
+"""
+Repoview is a small utility to generate static HTML pages for a repodata
+directory, to make it easily browseable.
+"""
 ##
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,6 +23,8 @@
 # Copyright (C) 2005 by Duke University, http://www.duke.edu/
 # Author: Konstantin Ryabitsev <icon@duke.edu>
 #
+
+__revision__ = '$Id$'
 
 import fnmatch
 import getopt
@@ -64,15 +69,15 @@ def _bn(tag):
     """
     This is a very dirty way to go from {xmlns}tag to just tag.
     """
-    try: return tag.split('}')[1]
-    except: return tag
+    return tag.split('}')[-1]
 
 emailre = re.compile('<.*?@.*?>')
 def _webify(text):
     """
     Make it difficult to harvest email addresses.
     """
-    if text is None: return None
+    if text is None: 
+        return None
     mo = emailre.search(text)
     if mo:
         email = mo.group(0)
@@ -86,9 +91,11 @@ def _say(text, flush=0):
     """
     Unless in quiet mode, output the text passed.
     """
-    if quiet: return
+    if quiet: 
+        return
     sys.stdout.write(text)
-    if flush: sys.stdout.flush()
+    if flush: 
+        sys.stdout.flush()
 
 def _mkid(text):
     """
@@ -150,6 +157,11 @@ class Package:
         self.r = r
         self.group = None
         self.rpmgroup = None
+        self.summary = None
+        self.description = None
+        self.url = None
+        self.license = None
+        self.vendor = None
         self.arches = {}
         self.incomplete = 1
         self.changelogs = []
@@ -158,9 +170,11 @@ class Package:
         """
         Accept a dict with key-value pairs and populate ourselves with it.
         """
-        if self.incomplete: self._getPrimary(pkgdata)
+        if self.incomplete: 
+            self._getPrimary(pkgdata)
         pkgid = pkgdata['checksum']
-        if self.arches.has_key(pkgid): return
+        if self.arches.has_key(pkgid): 
+            return
         arch = Archer(pkgdata)
         self.arches[pkgid] = arch
 
@@ -169,7 +183,8 @@ class Package:
         Accept changelogs from other-parser and assign them, unless we
         already have some (sometimes happens with multiple architectures).
         """
-        if self.changelogs: return 0
+        if self.changelogs: 
+            return 0
         self.changelogs = changelogs
         return 1
     
@@ -254,11 +269,13 @@ class Group:
                 retlist.append(nevrlist[nevr])
             self.packages = retlist
             self.sorted = 1
-        if not trim or len(self.packages) <= trim: return self.packages
+        if not trim or len(self.packages) <= trim: 
+            return self.packages
         retlist = []
         i = 0
         for pkg in self.packages:
-            if pkg.nevr == nevr: break
+            if pkg.nevr == nevr: 
+                break
             i += 1
         half = trim/2
         if i - half < 0:
@@ -271,10 +288,10 @@ class RepoView:
     """
     The base class.
     """
-    def __init__(self, repodir, ignore=[], xarch=[], force=0, maxlatest=30):
+    def __init__(self, repodir, ignore=None, xarch=None, force=0, maxlatest=30):
         self.repodir = repodir
-        self.ignore = ignore
-        self.xarch = xarch
+        self.ignore = ignore is not None and ignore or []
+        self.xarch = xarch is not None and xarch or []
         self.arches = []
         self.force = force
         self.outdir = os.path.join(self.repodir, 'repodata', 'repoview')
@@ -282,6 +299,9 @@ class RepoView:
         self.groups = GroupFactory()
         self.letters = GroupFactory()
         self.maxlatest = maxlatest
+        self.toplevel = 0
+        self.pkgcount = 0
+        self.pkgignored = 0
         self.repodata = {}
         repomd = os.path.join(self.repodir, 'repodata', 'repomd.xml')
         if not os.access(repomd, os.R_OK):
@@ -300,17 +320,17 @@ class RepoView:
         """
         Parser method for repomd.xml
         """
-        type = 'unknown'
+        atype = 'unknown'
         _say('Reading repository data...', 1)
-        for event, elem in iterparse(loc, events=('start',)):
+        for event, elem in iterparse(loc, events=('start',)): #IGNORE:W0612
             tag = _bn(elem.tag)
             if tag == 'data':
-                type = elem.get('type', 'unknown')
-                self.repodata[type] = {}
+                atype = elem.get('type', 'unknown')
+                self.repodata[atype] = {}
             elif tag == 'location':
-                self.repodata[type]['location'] = elem.get('href', '#')
+                self.repodata[atype]['location'] = elem.get('href', '#')
             elif tag == 'checksum':
-                self.repodata[type]['checksum'] = elem.text
+                self.repodata[atype]['checksum'] = elem.text
             elem.clear()
         _say('done\n')
         self._checkNecessity()
@@ -321,7 +341,8 @@ class RepoView:
         one recorded during the last run in repoview/checksum. If they match,
         the program exits, unless overridden with -f.
         """
-        if self.force: return 1
+        if self.force: 
+            return 1
         ## Check and get the existing repoview checksum file
         try:
             chkfile = os.path.join(self.outdir, 'checksum')
@@ -330,7 +351,8 @@ class RepoView:
             fh.close()
         except IOError: return 1
         checksum = checksum.strip()
-        if checksum != self.repodata['primary']['checksum']: return 1
+        if checksum != self.repodata['primary']['checksum']: 
+            return 1
         _say("RepoView: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
 
@@ -339,8 +361,10 @@ class RepoView:
         Transparently handle gzipped xml files.
         """
         loc = os.path.join(self.repodir, loc)
-        if loc[-3:] == '.gz': fh = gzip.open(loc, 'r')
-        else: fh = open(loc, 'r')
+        if loc[-3:] == '.gz': 
+            fh = gzip.open(loc, 'r')
+        else: 
+            fh = open(loc, 'r')
         return fh
 
     def _parseGroups(self):
@@ -352,7 +376,7 @@ class RepoView:
         namemap = self._getNameMap()
         pct = 0
         group = Group()
-        for event, elem in iterparse(fh):
+        for event, elem in iterparse(fh): #IGNORE:W0612
             tag = elem.tag
             if tag == 'group':
                 pct += 1
@@ -366,8 +390,10 @@ class RepoView:
             elif tag == 'description' and not elem.attrib:
                 group.description = _webify(elem.text)
             elif tag == 'uservisible':
-                if elem.text.lower() == 'true': group.uservisible = 1
-                else: group.uservisible = 0
+                if elem.text.lower() == 'true': 
+                    group.uservisible = 1
+                else: 
+                    group.uservisible = 0
             elif tag == 'packagereq':
                 pkgname = elem.text
                 if pkgname in namemap.keys():
@@ -415,10 +441,11 @@ class RepoView:
             'license',
             'group',
             'vendor')
-        for event, elem in iterparse(fh):
+        for event, elem in iterparse(fh): #IGNORE:W0612
             tag = _bn(elem.tag)
             if tag == 'package':
-                if not self._doPackage(pkgdata): ignored += 1
+                if not self._doPackage(pkgdata): 
+                    ignored += 1
                 pct += 1
                 _say('\rparsing primary: %s packages, %s ignored' % 
                         (pct, ignored))
@@ -445,15 +472,16 @@ class RepoView:
         to create a new package or add arches to existing ones, or ignore it
         outright.
         """
-        if not pkgdata: return 0
-        if pkgdata['arch'] in self.xarch: return 0
+        if not pkgdata or pkgdata['arch'] in self.xarch: 
+            return 0
         if pkgdata['arch'] not in self.arches: 
             self.arches.append(pkgdata['arch'])
         ## We make a package here from pkgdata ##
         (n, e, v, r) = (pkgdata['name'], pkgdata['epoch'], 
                         pkgdata['ver'], pkgdata['rel'])
         pkgid = self._mkpkgid(n, e, v, r)
-        if self._checkIgnore(pkgid): return 0
+        if self._checkIgnore(pkgid): 
+            return 0
         if self.packages.has_key(pkgid):
             package = self.packages[pkgid]
         else:
@@ -469,7 +497,8 @@ class RepoView:
         via -i.
         """
         for glob in self.ignore:
-            if fnmatch.fnmatchcase(pkgid, glob): return 1
+            if fnmatch.fnmatchcase(pkgid, glob): 
+                return 1
         return 0
 
     def _parseOther(self, limit=3):
@@ -483,12 +512,13 @@ class RepoView:
         changelogs = []
         evr = None
         cct = 0
-        for event, elem in iterparse(fh):
+        for event, elem in iterparse(fh): #IGNORE:W0612
             tag = _bn(elem.tag)
             if tag == 'package':
                 n = elem.get('name', '__unknown__')
                 pkgid = self._mkpkgid(n, evr['epoch'], evr['ver'], evr['rel'])
-                if not self._doOther(pkgid, changelogs): ignored += 1
+                if not self._doOther(pkgid, changelogs): 
+                    ignored += 1
                 pct += 1
                 _say('\rparsing other: %s packages, %s ignored' % 
                     (pct, ignored))
@@ -499,7 +529,8 @@ class RepoView:
             elif tag == 'version':
                 evr = self._getevr(elem)
             elif tag == 'changelog':
-                if cct >= limit: continue
+                if cct >= limit: 
+                    continue
                 author = _webify(elem.get('author', 'incognito'))
                 date = int(elem.get('date', '0'))
                 changelog = _webify(elem.text)
@@ -573,7 +604,8 @@ class RepoView:
             # btime is number of seconds since epoch, so reverse logic!
             btime = 0
             for arch in package.arches.values():
-                if arch.time > btime: btime = arch.time
+                if arch.time > btime: 
+                    btime = arch.time
             if len(latest.keys()) < self.maxlatest:
                 latest[btime] = package
             else:
@@ -593,14 +625,15 @@ class RepoView:
         times.reverse()
         lgroup = Group(grid='__latest__', 
                        name='Last %s Packages Updated' % len(times))
-        for time in times:
-            lgroup.packages.append(latest[time])
+        for atime in times:
+            lgroup.packages.append(latest[atime])
         lgroup.sorted = 1
         self.groups[lgroup.grid] = lgroup
         _say('...done\n', 1)
         ## Prune empty groups
         for grid in self.groups.keys():
-            if not self.groups[grid].packages: del self.groups[grid]
+            if not self.groups[grid].packages: 
+                del self.groups[grid]
 
     def _mkOutDir(self, templatedir):
         """
@@ -619,7 +652,7 @@ class RepoView:
             shutil.copytree(layoutsrc, layoutdst)
             _say('done\n', 1)
 
-    def mkLinkUrl(self, object, isindex=0):
+    def mkLinkUrl(self, obj, isindex=0):
         """
         This is a utility method passed to kid templates. The templates use 
         it to get the link to a package, group, or layout object without
@@ -628,23 +661,25 @@ class RepoView:
         link = '#'
         prefix = ''
         if isindex:
-            if self.toplevel: prefix = os.path.join('repodata', 'repoview')
+            if self.toplevel: 
+                prefix = os.path.join('repodata', 'repoview')
             else: prefix = 'repoview'
-        if object.__class__ is str:
-            if not isindex and object == idxfile:
-                if self.toplevel: link = os.path.join('..', '..', object)
-                else: link = os.path.join('..', object)
+        if obj.__class__ is str:
+            if not isindex and obj == idxfile:
+                if self.toplevel: 
+                    link = os.path.join('..', '..', obj)
+                else: link = os.path.join('..', obj)
             else:
-                link = os.path.join(prefix, object)
-        elif object.__class__ is Package:
-            link = os.path.join(prefix, pkgfile % object.pkgid)
-        elif object.__class__ is Group:
-            link = os.path.join(prefix, grfile % object.grid)
-        elif object.__class__ is Archer:
+                link = os.path.join(prefix, obj)
+        elif obj.__class__ is Package:
+            link = os.path.join(prefix, pkgfile % obj.pkgid)
+        elif obj.__class__ is Group:
+            link = os.path.join(prefix, grfile % obj.grid)
+        elif obj.__class__ is Archer:
             if isindex and self.toplevel:
-                link = os.path.join('..', object.loc)
+                link = os.path.join('..', obj.loc)
             else:
-                link = os.path.join('..', '..', object.loc)
+                link = os.path.join('..', '..', obj.loc)
         return link
 
     def applyTemplates(self, templatedir, toplevel=0, title='RepoView'):
@@ -713,8 +748,10 @@ class RepoView:
         self.arches.sort()
         kobj = Template(file=idxtmpl, mkLinkUrl=self.mkLinkUrl,
             letters=self.letters, groups=self.groups, stats=stats)
-        if self.toplevel: out = os.path.join(self.repodir, idxfile)
-        else: out = os.path.join(self.repodir, 'repodata', idxfile)
+        if self.toplevel: 
+            out = os.path.join(self.repodir, idxfile)
+        else: 
+            out = os.path.join(self.repodir, 'repodata', idxfile)
         fh = open(out, 'w')
         kobj.write(out)
         fh.close()
@@ -727,7 +764,8 @@ class RepoView:
         _say('done\n')
 
 def usage(ecode=0):
-    print """
+    "Print usage and exit with ecode passed"
+    sys.stderr.write("""
     repoview [-i name] [-x arch] [-k dir] [-l title] [-t] [-f] [-q] [repodir]
     This will make your repository browseable
     -i name
@@ -757,13 +795,14 @@ def usage(ecode=0):
     -q
         Do not output anything except fatal erros.
     repodir
-        Where to look for the 'repodata' directory.
-    """ % DEFAULT_TEMPLATEDIR
+        Where to look for the 'repodata' directory.\n""" % DEFAULT_TEMPLATEDIR)
     sys.exit(ecode)
 
 def main(args):
-    global quiet
-    if not args: usage()
+    "Main program code"
+    global quiet #IGNORE:W0121
+    if not args: 
+        usage()
     ignore = []
     xarch = []
     toplevel = 0
@@ -772,15 +811,23 @@ def main(args):
     force = 0
     try:
         gopts, cmds = getopt.getopt(args, 'i:x:k:l:tfqh', ['help'])
-        if not cmds: usage(1)
+        if not cmds: 
+            usage(1)
         for o, a in gopts:
-            if o == '-i': ignore.append(a)
-            elif o == '-x': xarch.append(a)
-            elif o == '-k': templatedir = a
-            elif o == '-l': title = a
-            elif o == '-t': toplevel = 1
-            elif o == '-f': force = 1
-            elif o == '-q': quiet = 1
+            if o == '-i': 
+                ignore.append(a)
+            elif o == '-x': 
+                xarch.append(a)
+            elif o == '-k': 
+                templatedir = a
+            elif o == '-l': 
+                title = a
+            elif o == '-t': 
+                toplevel = 1
+            elif o == '-f': 
+                force = 1
+            elif o == '-q': 
+                quiet = 1
             else: usage()
         repodir = cmds[0]
     except getopt.error, e:
