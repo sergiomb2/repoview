@@ -1,9 +1,8 @@
 # $Id$
 
 Name:           repoview
-Version:        0.3
+Version:        0.4
 Release:        1
-Epoch:          0
 Summary:        Creates a set of static HTML pages in a yum repository.
 
 Group:          Applications/System
@@ -13,7 +12,7 @@ Source0:        http://linux.duke.edu/projects/mini/%{name}/download/%{name}-%{v
 BuildRoot:      %{_tmppath}/%{name}-%{version}-root
 BuildArch:      noarch
 
-Requires:       python >= 2.2, python-kid >= 0.6.3, python-elementtree
+Requires:       python >= 2.2, python-kid >= 0.6.3, yum >= 2.3
 
 %description
 RepoView creates a set of static HTML pages in a yum repository for easy
@@ -55,6 +54,11 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
+* Fri Sep 23 2005 Konstantin Ryabitsev <icon@linux.duke.edu> - 0.4-1
+- Version 0.4
+- Add yum >= 2.3 requirement
+- Drop python-elementtree dependency, since it's required by yum
+
 * Fri Mar 25 2005 Konstantin Ryabitsev <icon@linux.duke.edu> 0.3-1
 - Version 0.3
 

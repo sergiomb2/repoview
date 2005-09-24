@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
   <title py:content="'RepoView: %s' % stats['title']"/>
@@ -66,7 +68,7 @@
             <dd><pre py:content="log[2]"/></dd>
         </dl>
         <p class="footernote">
-          <span py:content="'Listing generated: %s by' % stats['gentime']"/>
+          Listing created by
           <a href="http://linux.duke.edu/projects/mini/repoview/"
             class="repoview" py:content="'RepoView-%s' % stats['VERSION']"/>
         </p>

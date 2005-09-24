@@ -4,7 +4,7 @@
     font-size: small;
     }
 .nactive {
-    border: 1px dotted blue; 
+    border-bottom: 1px dotted blue; 
     background-color: lavender; 
     color: blue;
     font-size: small;
@@ -12,29 +12,26 @@
     }
 .ninactive {
     color: gray; 
-    border-style: 1px none;
     font-size: small; 
     }
 .nlink {
     text-decoration: none; 
     color: blue; 
-    border: 1px none;
     font-size: small; 
     }
 .nlink:hover {
     background-color: lavender; 
-    border: 1px dotted blue;
+    border-bottom: 1px dotted blue;
     font-size: small; 
     }
 .inpage {
     text-decoration: none;
     color: blue;
-    border: 1px none;
     }
 .inpage:hover {
     background-color: mistyrose;
     color: red;
-    border: 1px dotted red;
+    border-bottom: 1px dotted red;
     }
 .levbar {
     position: absolute; 
@@ -90,8 +87,11 @@ th  {
     list-style-type: circle;
     }
 .letterlist {
-    letter-spacing: 0.1em;
     background-color: whitesmoke;
+    }
+.letterlist a {
+    padding-left: 0.2em;
+    padding-right: 0.2em;
     }
 .footernote {
     text-align: right;
@@ -103,18 +103,12 @@ th  {
 .repoview {
     text-decoration: none;
     color: gray;
-    border-left: 1px dotted gray;
-    border-right: 1px dotted gray;
     border-bottom: 1px dotted gray;
-    border-top: 1px none;
     font-size: small; 
     }
 .repoview:hover {
     background-color: lavender; 
-    border-left: 1px dotted blue;
-    border-right: 1px dotted blue;
     border-bottom: 1px dotted blue;
-    border-top: 1px none;
     color: blue;
     font-size: small; 
     }

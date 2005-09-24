@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
   <title py:content="'RepoView: %s' % stats['title']"/>
@@ -40,16 +42,14 @@
             by arch:
             <span py:content="stats['ignorearchlist'] and ', '.join(stats['ignorearchlist']) or 'none'"/>)
           </li>
-          <li>
-            Total groups: <span py:content="len(groups.keys())"/>
-          </li>
         </ul>
         <h3>Latest packages:</h3>
         <ul class="pkglist">
           <li py:for="pkg in groups['__latest__'].getSortedList(trim=0)">
-            <a href="${mkLinkUrl(pkg, isindex=1)}" class="inpage"
-                py:content="'%s-%s-%s' % (pkg.n, pkg.v, pkg.r)"/>:
-            <span py:content="pkg.summary"/>
+            <em><span py:content="pkg.getTime('%d-%b-%Y')"/></em>:
+            <a href="${mkLinkUrl(pkg, isindex=1)}" 
+            	title="${pkg.summary}" class="inpage"
+                py:content="'%s-%s-%s' % (pkg.n, pkg.v, pkg.r)"/>
           </li>
         </ul>
         <h3>Available Groups</h3>

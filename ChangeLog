@@ -1,3 +1,13 @@
+Version 0.4
+	* Add DOCTYPE declarations (#482)
+	* Use YUM parsing routines with "noyum" fallback for people with no yum
+	  or yum <= 2.3 (see README)
+	* Fix the "latest packages" selection behaviour (#485, rh#168125)
+	* Remove the (fairly useless) "Total Groups" summary
+	* CSS Fixes from Ville Skyttä (#483, #484)
+	* Add timestamps to the index page "Latest Packages" listing (#501)
+	* Preserve unchanged files for more efficient mirroring (#492)
+
 Version 0.3
 	* Fall back to silly RPM groups if no group data is found.
 	* Replace all slashes and spaces in group names to avoid breakage.

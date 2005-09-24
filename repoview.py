@@ -28,21 +28,25 @@ __revision__ = '$Id$'
 
 import fnmatch
 import getopt
-import gzip
 import os
 import re
 import shutil
 import sys
 import time
+import zlib
 
-## 
-# Try to import cElementTree, and if that fails attempt to fall back to
-# ElementTree, a slower, but pure-python implementation.
-#
-try: 
-    from cElementTree import iterparse
-except ImportError: 
-    from elementtree.ElementTree import iterparse
+try:
+    from yum.comps import Comps
+    from yum.mdparser import MDParser
+    from repomd.repoMDObject import RepoMD
+except ImportError:
+    try:
+        from noyum.comps import Comps #IGNORE:F0401
+        from noyum.mdparser import MDParser #IGNORE:F0401
+        from noyum.repoMDObject import RepoMD #IGNORE:F0401
+    except ImportError:
+        print "No yum parsing routines found. Please see README."
+        sys.exit(1)
 
 from kid import Template
 ##
@@ -62,14 +66,8 @@ grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
 
-VERSION = '0.3'
+VERSION = '0.4'
 DEFAULT_TEMPLATEDIR = './templates'
-
-def _bn(tag):
-    """
-    This is a very dirty way to go from {xmlns}tag to just tag.
-    """
-    return tag.split('}')[-1]
 
 emailre = re.compile('<.*?@.*?>')
 def _webify(text):
@@ -83,7 +81,13 @@ def _webify(text):
         email = mo.group(0)
         remail = email.replace('.', '{*}')
         remail = remail.replace('@', '{%}')
-        text = re.sub(email, remail, text)
+        try:
+            text = re.sub(email, remail, text)
+        except Exception: #IGNORE:W0703
+            ##
+            # Sometimes this fails for very odd reasons. Shrug it off.
+            #
+            pass
     return text
 
 quiet = 0
@@ -115,9 +119,9 @@ class Archer:
     """
     def __init__(self, pkgdata):
         self.arch = pkgdata['arch']
-        self.time = int(pkgdata['time'])
-        self.size = int(pkgdata['size'])
-        self.loc = pkgdata['location']
+        self.time = int(pkgdata['time_build'])
+        self.size = int(pkgdata['size_archive'])
+        self.loc = pkgdata['location_href']
         self.packager = pkgdata['packager']
 
     def getFileName(self):
@@ -172,7 +176,7 @@ class Package:
         """
         if self.incomplete: 
             self._getPrimary(pkgdata)
-        pkgid = pkgdata['checksum']
+        pkgid = pkgdata['pkgId']
         if self.arches.has_key(pkgid): 
             return
         arch = Archer(pkgdata)
@@ -208,10 +212,23 @@ class Package:
         self.changelogs.reverse()
         retlist = []
         for changelog in self.changelogs:
-            date, author, entry = changelog
-            date = time.strftime('%c', time.localtime(date))
+            author = _webify(changelog['author'])
+            date = time.strftime('%c', time.localtime(int(changelog['date'])))
+            entry = _webify(changelog['value'])
             retlist.append ([date, author, entry])
         return retlist
+        
+    def getTime(self, format='%c'):
+        """
+        Convenience method for templates. Returns the latest buildtime from
+        all available arches, formatted as requested.
+        """
+        btime = 0
+        for arch in self.arches.values():
+            if arch.time > btime:
+                btime = arch.time
+        date = time.strftime(format, time.localtime(btime))
+        return date
 
 class GroupFactory(dict):
     """
@@ -294,8 +311,10 @@ class RepoView:
         self.xarch = xarch is not None and xarch or []
         self.arches = []
         self.force = force
-        self.outdir = os.path.join(self.repodir, 'repodata', 'repoview')
+        self.olddir = os.path.join(self.repodir, 'repodata', 'repoview')
+        self.outdir = os.path.join(self.repodir, 'repodata', '.repoview.new')
         self.packages = {}
+        self.csums = {}
         self.groups = GroupFactory()
         self.letters = GroupFactory()
         self.maxlatest = maxlatest
@@ -308,33 +327,17 @@ class RepoView:
             sys.stderr.write('Not found: %s\n' % repomd)
             sys.stderr.write('Does not look like a repository. Exiting.\n')
             sys.exit(1)
-        self._parseRepoMD(repomd)
-        ## Do packages (primary.xml and other.xml)
-        self._parsePrimary()
-        self._parseOther()
-        ## Do groups and resolve them
-        if self.repodata.has_key('group'):
-            self._parseGroups()
-
-    def _parseRepoMD(self, loc):
-        """
-        Parser method for repomd.xml
-        """
-        atype = 'unknown'
         _say('Reading repository data...', 1)
-        for event, elem in iterparse(loc, events=('start',)): #IGNORE:W0612
-            tag = _bn(elem.tag)
-            if tag == 'data':
-                atype = elem.get('type', 'unknown')
-                self.repodata[atype] = {}
-            elif tag == 'location':
-                self.repodata[atype]['location'] = elem.get('href', '#')
-            elif tag == 'checksum':
-                self.repodata[atype]['checksum'] = elem.text
-            elem.clear()
+        self.repodata = RepoMD(None, repomd).repoData
         _say('done\n')
         self._checkNecessity()
-            
+        ## Do packages (primary.xml and other.xml)
+        self._getPrimary()
+        self._getOther()
+        ## Do groups and resolve them
+        if self.repodata.has_key('group'):
+            self._getGroups()
+
     def _checkNecessity(self):
         """
         This will look at the checksum for primary.xml and compare it to the
@@ -351,59 +354,36 @@ class RepoView:
             fh.close()
         except IOError: return 1
         checksum = checksum.strip()
-        if checksum != self.repodata['primary']['checksum']: 
+        if checksum != self.repodata['primary']['checksum'][1]: 
             return 1
         _say("RepoView: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
 
-    def _getFileFh(self, loc):
-        """
-        Transparently handle gzipped xml files.
-        """
-        loc = os.path.join(self.repodir, loc)
-        if loc[-3:] == '.gz': 
-            fh = gzip.open(loc, 'r')
-        else: 
-            fh = open(loc, 'r')
-        return fh
-
-    def _parseGroups(self):
+    def _getGroups(self):
         """
         Utility method for parsing comps.xml.
         """
         _say('parsing comps...', 1)
-        fh = self._getFileFh(self.repodata['group']['location'])
+        loc = self.repodata['group']['relativepath']
+        groups = Comps(os.path.join(self.repodir, loc)).groups.values()
         namemap = self._getNameMap()
         pct = 0
-        group = Group()
-        for event, elem in iterparse(fh): #IGNORE:W0612
-            tag = elem.tag
-            if tag == 'group':
-                pct += 1
-                _say('\rparsing comps: %s groups' % pct)
-                self.groups[group.grid] = group
-                group = Group()
-            elif tag == 'id':
-                group.grid = _mkid(elem.text)
-            elif tag == 'name' and not elem.attrib:
-                group.name = _webify(elem.text)
-            elif tag == 'description' and not elem.attrib:
-                group.description = _webify(elem.text)
-            elif tag == 'uservisible':
-                if elem.text.lower() == 'true': 
-                    group.uservisible = 1
-                else: 
-                    group.uservisible = 0
-            elif tag == 'packagereq':
-                pkgname = elem.text
+        for entry in groups:
+            pct += 1
+            group = Group()
+            group.grid = _mkid(entry.id)
+            group.name = _webify(entry.name)
+            group.description = _webify(entry.description)
+            group.uservisible = entry.user_visible
+            for pkgname in entry.packages.keys():
                 if pkgname in namemap.keys():
                     pkglist = namemap[pkgname]
                     group.packages += pkglist
                     for pkg in pkglist:
                         pkg.group = group
-            elem.clear()
+            _say('\rparsing comps: %s groups' % pct)
+            self.groups[group.grid] = group
         _say('...done\n', 1)
-        fh.close()
 
     def _getNameMap(self):
         """
@@ -421,54 +401,26 @@ class RepoView:
                 namemap[name].append(package)
         return namemap
 
-    def _parsePrimary(self):
+    def _getPrimary(self):
         """
-        Utility method for parsing primary.xml.
+        Utility method for processing primary.xml.
         """
         _say('parsing primary...', 1)
-        fh = self._getFileFh(self.repodata['primary']['location'])
-        pct = 0
+        loc = self.repodata['primary']['relativepath']
+        mdp = MDParser(os.path.join(self.repodir, loc))
         ignored = 0
-        pkgdata = {}
-        simpletags = (
-            'name', 
-            'arch', 
-            'summary', 
-            'description', 
-            'url',
-            'packager',
-            'checksum',
-            'license',
-            'group',
-            'vendor')
-        for event, elem in iterparse(fh): #IGNORE:W0612
-            tag = _bn(elem.tag)
-            if tag == 'package':
-                if not self._doPackage(pkgdata): 
-                    ignored += 1
-                pct += 1
-                _say('\rparsing primary: %s packages, %s ignored' % 
-                        (pct, ignored))
-                pkgdata = {}
-            elif tag in simpletags:
-                pkgdata[tag] = _webify(elem.text)
-            elif tag == 'version':
-                pkgdata.update(self._getevr(elem))
-            elif tag == 'time':
-                pkgdata['time'] = elem.get('build', '0')
-            elif tag == 'size':
-                pkgdata['size'] = elem.get('package', '0')
-            elif tag == 'location':
-                pkgdata['location'] = elem.get('href', '#')
-            elem.clear()
-        self.pkgcount = pct - ignored
+        for package in mdp:
+            if not self._doPackage(package): 
+                ignored += 1
+            _say('\rparsing primary: %s packages, %s ignored' % (mdp.count,
+                ignored))
+        self.pkgcount = mdp.count - ignored
         self.pkgignored = ignored
         _say('...done\n', 1)
-        fh.close()
 
     def _doPackage(self, pkgdata):
         """
-        Helper method for cleanliness. Accepts pkgdata and sees if we need
+        Helper method for cleanliness. Accepts mdparser pkg and sees if we need
         to create a new package or add arches to existing ones, or ignore it
         outright.
         """
@@ -489,6 +441,7 @@ class RepoView:
             package.pkgid = pkgid
             self.packages[pkgid] = package
         package.doPackage(pkgdata)
+        self._recordCsums(package)
         return 1
         
     def _checkIgnore(self, pkgid):
@@ -500,69 +453,50 @@ class RepoView:
             if fnmatch.fnmatchcase(pkgid, glob): 
                 return 1
         return 0
-
-    def _parseOther(self, limit=3):
+        
+    def _recordCsums(self, package):
         """
-        Utility method to parse other.xml.
+        A small helper method to help map repodata package checksums to 
+        our representation of packages.
+        """
+        for csum in package.arches.keys():
+            self.csums[csum] = package
+    
+    def _getPackageByCsum(self, csum):
+        """
+        Return our representation of a package by the repodata checksum
+        provided.
+        """
+        if self.csums.has_key(csum):
+            return self.csums[csum]
+        else:
+            return None
+
+    def _getOther(self, limit=3):
+        """
+        Utility method to get data from other.xml.
         """
         _say('parsing other...', 1)
-        fh = self._getFileFh(self.repodata['other']['location'])
-        pct = 0
+        loc = self.repodata['other']['relativepath']
+        otherxml = os.path.join(self.repodir, loc)
         ignored = 0
-        changelogs = []
-        evr = None
-        cct = 0
-        for event, elem in iterparse(fh): #IGNORE:W0612
-            tag = _bn(elem.tag)
-            if tag == 'package':
-                n = elem.get('name', '__unknown__')
-                pkgid = self._mkpkgid(n, evr['epoch'], evr['ver'], evr['rel'])
-                if not self._doOther(pkgid, changelogs): 
-                    ignored += 1
-                pct += 1
-                _say('\rparsing other: %s packages, %s ignored' % 
-                    (pct, ignored))
-                evr = None
-                changelogs = []
-                n = None
-                cct = 0
-            elif tag == 'version':
-                evr = self._getevr(elem)
-            elif tag == 'changelog':
-                if cct >= limit: 
-                    continue
-                author = _webify(elem.get('author', 'incognito'))
-                date = int(elem.get('date', '0'))
-                changelog = _webify(elem.text)
-                changelogs.append([date, author, changelog])
-                cct += 1
-            elem.clear()
+        mdp = MDParser(otherxml)
+        for entry in mdp:
+            csum = entry['pkgId']
+            package = self._getPackageByCsum(csum)
+            if package is not None:
+                package.addChangelogs(entry['changelog'][:limit])
+            else:
+                ignored += 1
+            _say('\rparsing other: %s packages, %s ignored' % 
+                (mdp.count, ignored))
         _say('...done\n', 1)
-        fh.close()
-
-    def _doOther(self, pkgid, changelogs):
-        """
-        Helper method for cleanliness.
-        """
-        if pkgid and changelogs and self.packages.has_key(pkgid):
-            package = self.packages[pkgid]
-            return package.addChangelogs(changelogs)
-        return 0
         
     def _mkpkgid(self, n, e, v, r):
         """
         Make the n-e-v-r package id out of n, e, v, r.
         """
         return '%s-%s-%s-%s' % (n, e, v, r)
-
-    def _getevr(self, elem):
-        """
-        Utility method to get e-v-r out of the <version> element.
-        """
-        e = elem.get('epoch', '0')
-        v = elem.get('ver', '0')
-        r = elem.get('rel', '0')
-        return {'epoch': e, 'ver': v, 'rel': r}
 
     def _makeExtraGroups(self):
         """
@@ -576,7 +510,7 @@ class RepoView:
         """
         nogroup = Group(grid='__nogroup__', 
                         name='Packages not in Groups')
-        latest = {}
+        latest = []
         i = 0
         makerpmgroups = 0
         if not len(self.groups): 
@@ -606,27 +540,24 @@ class RepoView:
             for arch in package.arches.values():
                 if arch.time > btime: 
                     btime = arch.time
-            if len(latest.keys()) < self.maxlatest:
-                latest[btime] = package
+            if len(latest) < self.maxlatest:
+                latest.append([btime, package])
             else:
-                times = latest.keys()
-                times.sort()
-                times.reverse()
-                oldest = times[-1]
-                if btime > oldest:
-                    del latest[oldest]
-                    latest[btime] = package
+                latest.sort()
+                latest.reverse()
+                if btime > latest[-1][0]:
+                    latest.pop()
+                    latest.append([btime, package])
             i += 1
             _say('\rcreating extra groups: %s entries' % i)
         if nogroup.packages:
             self.groups[nogroup.grid] = nogroup
-        times = latest.keys()
-        times.sort()
-        times.reverse()
+        latest.sort()
+        latest.reverse()
         lgroup = Group(grid='__latest__', 
-                       name='Last %s Packages Updated' % len(times))
-        for atime in times:
-            lgroup.packages.append(latest[atime])
+                       name='Last %s Packages Updated' % len(latest))
+        for btime, package in latest:
+            lgroup.packages.append(package)
         lgroup.sorted = 1
         self.groups[lgroup.grid] = lgroup
         _say('...done\n', 1)
@@ -637,11 +568,10 @@ class RepoView:
 
     def _mkOutDir(self, templatedir):
         """
-        Remove the existing repoview directory if it exists, and create a
-        new one, copying in the layout dir from templates (if found).
+        Create the new repoview directory and copy the layout into it.
         """
         if os.path.isdir(self.outdir):
-            _say('deleting old repoview...', 1)
+            _say('deleting garbage dir...', 1)
             shutil.rmtree(self.outdir)
             _say('done\n', 1)
         os.mkdir(self.outdir)
@@ -682,6 +612,28 @@ class RepoView:
                 link = os.path.join('..', '..', obj.loc)
         return link
 
+    def _smartWrite(self, outfile, strdata):
+        """
+        First check if the strdata changed between versions. Write if yes.
+        Move the old file if no.
+        """
+        oldfile = os.path.join(self.olddir, outfile)
+        newfile = os.path.join(self.outdir, outfile)
+        if os.path.isfile(oldfile):
+            fh = open(oldfile, 'r')
+            contents = fh.read()
+            fh.close()
+            oldcrc = zlib.adler32(contents)
+            newcrc = zlib.adler32(strdata)
+            if oldcrc == newcrc:
+                os.rename(oldfile, newfile)
+                return 0
+            os.unlink(oldfile)
+        fh = open(newfile, 'w')
+        fh.write(strdata)
+        fh.close()
+        return 1        
+
     def applyTemplates(self, templatedir, toplevel=0, title='RepoView'):
         """
         Just what it says. :)
@@ -707,40 +659,46 @@ class RepoView:
         grtmpl = os.path.join(templatedir, grkid)
         kobj = Template(file=grtmpl, mkLinkUrl=self.mkLinkUrl,
                 letters=self.letters, groups=self.groups, stats=stats)
-        i = 0
+        w = 0
+        p = 0
         for grid in self.groups.keys():            
             kobj.group = self.groups[grid]
-            out = os.path.join(self.outdir, grfile % grid)
-            fh = open(out, 'w')
-            kobj.write(fh)
-            fh.close()
-            i += 1
-            _say('writing groups: %s written\r' % i)
+            outstr = kobj.serialize()
+            outfile = grfile % grid
+            if self._smartWrite(outfile, outstr):
+                w += 1
+            else:
+                p += 1
+            _say('writing groups: %s written, %s preserved\r' % (w, p))
         _say('\n', 1)
         ## Do letter groups
-        i = 0
+        w = 0
+        p = 0
         for grid in self.letters.keys():
             kobj.group = self.letters[grid]
-            out = os.path.join(self.outdir, grfile % grid)
-            fh = open(out, 'w')
-            kobj.write(fh)
-            fh.close()
-            i += 1
-            _say('writing letter groups: %s written\r' % i)
+            outstr = kobj.serialize()
+            outfile = grfile % grid
+            if self._smartWrite(outfile, outstr):
+                w += 1
+            else:
+                p += 1
+            _say('writing letter groups: %s written, %s preserved\r' % (w, p))
         _say('\n', 1)
         ## Do packages
-        i = 0
+        w = 0
+        p = 0
         pkgtmpl = os.path.join(templatedir, pkgkid)
         kobj = Template(file=pkgtmpl, mkLinkUrl=self.mkLinkUrl,
                 letters=self.letters, stats=stats)
         for pkgid in self.packages.keys():
             kobj.package = self.packages[pkgid]
-            out = os.path.join(self.outdir, pkgfile % pkgid)
-            fh = open(out, 'w')
-            kobj.write(fh)
-            fh.close()
-            i += 1
-            _say('writing packages: %s written\r' % i)
+            outstr = kobj.serialize()
+            outfile = pkgfile % pkgid
+            if self._smartWrite(outfile, outstr):
+                w += 1
+            else:
+                p += 1
+            _say('writing packages: %s written, %s preserved\r' % (w, p))
         _say('\n', 1)
         ## Do index
         _say('generating index...', 1)
@@ -759,8 +717,12 @@ class RepoView:
         _say('writing checksum...', 1)
         chkfile = os.path.join(self.outdir, 'checksum')
         fh = open(chkfile, 'w')
-        fh.write(self.repodata['primary']['checksum'])
+        fh.write(self.repodata['primary']['checksum'][1])
         fh.close()
+        _say('done\n')
+        _say('Moving new repoview dir in place...', 1)
+        shutil.rmtree(self.olddir)
+        shutil.move(self.outdir, self.olddir)
         _say('done\n')
 
 def usage(ecode=0):
