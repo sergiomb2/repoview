@@ -348,7 +348,7 @@ class RepoView:
             return 1
         ## Check and get the existing repoview checksum file
         try:
-            chkfile = os.path.join(self.outdir, 'checksum')
+            chkfile = os.path.join(self.olddir, 'checksum')
             fh = open(chkfile, 'r')
             checksum = fh.read()
             fh.close()
@@ -721,7 +721,8 @@ class RepoView:
         fh.close()
         _say('done\n')
         _say('Moving new repoview dir in place...', 1)
-        shutil.rmtree(self.olddir)
+        if os.path.isdir(self.olddir):
+            shutil.rmtree(self.olddir)
         shutil.move(self.outdir, self.olddir)
         _say('done\n')
 
