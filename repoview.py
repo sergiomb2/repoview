@@ -66,7 +66,7 @@ grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
 
-VERSION = '0.4'
+VERSION = '0.4.1'
 DEFAULT_TEMPLATEDIR = './templates'
 
 emailre = re.compile('<.*?@.*?>')
@@ -208,8 +208,6 @@ class Package:
         """
         Get the changelogs in the [c-formatted date, author, entry] style.
         """
-        self.changelogs.sort()
-        self.changelogs.reverse()
         retlist = []
         for changelog in self.changelogs:
             author = _webify(changelog['author'])
@@ -352,7 +350,8 @@ class RepoView:
             fh = open(chkfile, 'r')
             checksum = fh.read()
             fh.close()
-        except IOError: return 1
+        except IOError: 
+            return 1
         checksum = checksum.strip()
         if checksum != self.repodata['primary']['checksum'][1]: 
             return 1
@@ -756,7 +755,11 @@ def usage(ecode=0):
     -f
         Regenerate the pages even if the repomd checksum hasn't changed.
     -q
-        Do not output anything except fatal erros.
+        Do not output anything except fatal errors.
+    -V, --version
+        Print version number and exit.
+    -h, -?, --help
+        Print this usage message.
     repodir
         Where to look for the 'repodata' directory.\n""" % DEFAULT_TEMPLATEDIR)
     sys.exit(ecode)
@@ -773,9 +776,7 @@ def main(args):
     title = 'RepoView'
     force = 0
     try:
-        gopts, cmds = getopt.getopt(args, 'i:x:k:l:tfqh', ['help'])
-        if not cmds: 
-            usage(1)
+        gopts, cmds = getopt.getopt(args, 'i:x:k:l:tfqh?V', ['help', 'version'])
         for o, a in gopts:
             if o == '-i': 
                 ignore.append(a)
@@ -791,7 +792,12 @@ def main(args):
                 force = 1
             elif o == '-q': 
                 quiet = 1
+            elif o == '-V' or o == '--version':
+                print VERSION
+                sys.exit(0)
             else: usage()
+        if not cmds: 
+            usage(1)
         repodir = cmds[0]
     except getopt.error, e:
         print "Error: %s" % e

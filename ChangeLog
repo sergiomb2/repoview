@@ -1,3 +1,8 @@
+Version 0.4.1
+	* Add -V, --version, -h, and -? command-line options 
+	  (#504, patch by Ville Skyttä)
+	* Fix Changelog sorting (introduced in 0.4 with parser logic change)
+
 Version 0.4
 	* Add DOCTYPE declarations (#482)
 	* Use YUM parsing routines with "noyum" fallback for people with no yum
