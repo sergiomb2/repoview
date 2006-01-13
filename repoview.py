@@ -736,7 +736,7 @@ class RepoView:
             w = XMLWriter(out, 'utf-8')
             rss = w.start('rss', version='2.0')
             w.start('channel')
-            w.element('title', 'Repoview: %s' % title)
+            w.element('title', title)
             w.element('link', '%s/repodata/%s' % (url, rssfile))
             w.element('description', 'Latest packages for %s' % title)
             w.element('lastBuildDate', time.strftime(isoformat))
@@ -749,8 +749,7 @@ class RepoView:
                 w.element('guid', self.mkLinkUrl(pkg, isrss=1))
                 w.element('link', self.mkLinkUrl(pkg, isrss=1))
                 w.element('pubDate', pkg.getTime(isoformat))
-                w.element('title', '%s update: %s-%s-%s' 
-                           % (title, pkg.n, pkg.v, pkg.r))
+                w.element('title', 'Update: %s-%s-%s' % (pkg.n, pkg.v, pkg.r))
                 w.element('category', pkg.n)
                 w.element('category', pkg.group.name)
                 kobj.package = pkg
