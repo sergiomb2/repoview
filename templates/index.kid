@@ -5,6 +5,8 @@
 <head>
   <title py:content="'RepoView: %s' % stats['title']"/>
   <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css', isindex=1)}" type="text/css" />
+  <link py:if="stats['dorss'] is not None"
+	  rel="alternate" type="application/rss+xml" title="RSS" href="${mkLinkUrl('rss-feed', isrss=1, isindex=1)}" />
 </head>
 <body>
     <div class="levbar">

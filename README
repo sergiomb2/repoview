@@ -18,7 +18,7 @@ REQUIREMENTS:
 
 AUTHORS:
 --------
-Konstantin Ryabitsev <icon@linux.duke.edu>
+Konstantin Ryabitsev <icon@fedoraproject.org>
 
 URL:
 ----
@@ -26,7 +26,8 @@ http://www.linux.duke.edu/projects/mini/repoview/
 
 COPYRIGHT AND LICENSE:
 ----------------------
-This software is copyright (C) 2005 by Duke University.
+This software is copyright (C) 2005 by Duke University
+This software is copyright (C) 2006 by McGill University
 For licensing and copying information see COPYING.
 
 USAGE:

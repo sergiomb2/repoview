@@ -1,10 +1,10 @@
-.TH "repoview" "8" "0.1" "Konstantin Ryabitsev" "Applications/Utilities"
+.TH "repoview" "8" "0.5" "Konstantin Ryabitsev" "Applications/Utilities"
 
 .SH NAME
 \fBrepoview\fR \- Make YUM repositories browseable
 
 .SH SYNOPSIS
-\fBrepoview\fR [\-i name] [\-x arch] [\-k dir] [\-l title] [\-t] [\-f] [\-q] repodir
+\fBrepoview\fR [options] repodir
 
 .SH DESCRIPTION
 RepoView allows one to easily create a set of static HTML pages in a 
@@ -14,7 +14,7 @@ customizeable.
 
 .SH OPTIONS
 .TP
-.B \-i name
+.B \-i, \-\-ignore\-package NAME
 Optionally ignore this package \-\- can be a shell-style glob.
 This is useful for excluding debuginfo packages:
 .br
@@ -23,37 +23,40 @@ This is useful for excluding debuginfo packages:
 The globbing will be done against name-epoch-version-release, e.g. 
 foo-0-1.0-1
 .TP
-.B \-x arch
+.B \-x, \-\-exclude\-arch ARCH
 Optionally exclude this arch. E.g.:
 .br
 \-x src \-x ia64
 .TP
-.B \-k dir
+.B \-k, \-\-template\-dir DIR
 Use an alternative directory with kid templates instead of the 
-default: ./templates. The template directory must contain three 
-required template files: index.kid, group.kid, package.kid and 
+default: ./templates. The template directory must contain four 
+required template files: index.kid, group.kid, package.kid, rss.kid and 
 the "layout" dir which will be copied into the repoview directory.
 .TP
-.B \-l title
+.B \-t, \-\-title TITLE
 Describe the repository in a few words. By default "RepoView" is used. 
 E.g.:
 .br
--l "Extras for Fedora Core 3 x86"
+\-t "Extras for Fedora Core 3 x86"
 .TP
-.B \-t
-Place the index.html into the top level of the repodir, instead of
-just in repodata/index.html.
+.B \-u, \-\-url URL
+Repository URL to use when generating the RSS feed. E.g.: 
+.br
+\-u "http://fedoraproject.org/extras/4/i386"
+.br
+Not providng a url will disable RSS feed generation.
 .TP
-.B \-f
+.B \-f, \-\-force
 Regenerate the pages even if the repomd checksum has not changed.
 .TP
-.B \-q
+.B \-q, \-\-quiet
 Do not output anything except fatal erros.
 .TP
 .B \-V, \-\-version
 Print version number and exit.
 .TP
-.B \-h, \-?, \-\-help
+.B \-h, \-\-help
 Print usage message and exit.
 .TP
 .B repodir
@@ -71,15 +74,20 @@ The simplest invocation is:
 .LP 
 .B repoview /path/to/repository
 .br
-.B repoview -l "Fedora Extras 3 ix86" /path/to/repository
+.B repoview -t 'Fedora Extras 4 ix86' /path/to/repository
 .LP 
 When running from cron, you want to use the \-q switch:
 .LP 
 .B repoview -q /path/to/repository
+.br
+.LP
+This will generate an RSS feed:
+.LP
+.B repoview -u http://example.com/repo/i386 /path/to/repository
 
 .SH "AUTHORS"
 .LP 
-Konstantin Ryabitsev <icon@linux.duke.edu>
+Konstantin Ryabitsev <icon@fedoraproject.org>
 
 .SH "SEE ALSO"
 .LP 

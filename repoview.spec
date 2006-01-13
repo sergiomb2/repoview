@@ -1,7 +1,7 @@
 # $Id$
 
 Name:           repoview
-Version:        0.4.1
+Version:        0.5
 Release:        1
 Summary:        Creates a set of static HTML pages in a yum repository.
 
@@ -38,7 +38,7 @@ mkdir -p -m 755                         \
     $RPM_BUILD_ROOT/%{_mandir}/man8
 install -m 755 repoview.py  $RPM_BUILD_ROOT/%{_bindir}/repoview
 install -m 644 repoview.8   $RPM_BUILD_ROOT/%{_mandir}/man8/
-cp -rp templates            $RPM_BUILD_ROOT/%{_datadir}/%{name}/
+cp -a templates             $RPM_BUILD_ROOT/%{_datadir}/%{name}/
 
 
 %clean
@@ -54,6 +54,9 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
+* Fri Jan 13 2005 Konstantin Ryabitsev <icon@fedoraproject.org> - 0.5-1
+- Version 0.5
+
 * Fri Oct 07 2005 Konstantin Ryabitsev <icon@linux.duke.edu> - 0.4.1-1
 - Version 0.4.1
 

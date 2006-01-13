@@ -21,19 +21,22 @@ directory, to make it easily browseable.
 # $Id$
 #
 # Copyright (C) 2005 by Duke University, http://www.duke.edu/
-# Author: Konstantin Ryabitsev <icon@duke.edu>
+# Copyright (C) 2006 by McGill University, http://www.mcgill.ca/
+# Author: Konstantin Ryabitsev <icon@fedoraproject.org>
 #
 
 __revision__ = '$Id$'
 
 import fnmatch
-import getopt
 import os
 import re
 import shutil
 import sys
 import time
 import zlib
+
+from optparse import OptionParser
+from elementtree.SimpleXMLWriter import XMLWriter
 
 try:
     from yum.comps import Comps
@@ -65,8 +68,10 @@ grkid = 'group.kid'
 grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
+rsskid = 'rss.kid'
+rssfile = 'latest-feed.xml'
 
-VERSION = '0.4.1'
+VERSION = '0.5'
 DEFAULT_TEMPLATEDIR = './templates'
 
 emailre = re.compile('<.*?@.*?>')
@@ -309,6 +314,7 @@ class RepoView:
         self.xarch = xarch is not None and xarch or []
         self.arches = []
         self.force = force
+        self.url = None
         self.olddir = os.path.join(self.repodir, 'repodata', 'repoview')
         self.outdir = os.path.join(self.repodir, 'repodata', '.repoview.new')
         self.packages = {}
@@ -316,7 +322,6 @@ class RepoView:
         self.groups = GroupFactory()
         self.letters = GroupFactory()
         self.maxlatest = maxlatest
-        self.toplevel = 0
         self.pkgcount = 0
         self.pkgignored = 0
         self.repodata = {}
@@ -581,34 +586,43 @@ class RepoView:
             shutil.copytree(layoutsrc, layoutdst)
             _say('done\n', 1)
 
-    def mkLinkUrl(self, obj, isindex=0):
+    def mkLinkUrl(self, obj, isindex=0, isrss=0):
         """
         This is a utility method passed to kid templates. The templates use 
         it to get the link to a package, group, or layout object without
         having to figure things out on their own.
         """
-        link = '#'
-        prefix = ''
-        if isindex:
-            if self.toplevel: 
-                prefix = os.path.join('repodata', 'repoview')
-            else: prefix = 'repoview'
+        if isindex and not isrss:
+            prefix = 'repoview'
+        elif isrss:
+            if isindex:
+                prefix = os.path.join(self.url, 'repodata')
+            else:
+                prefix = os.path.join(self.url, 'repodata', 'repoview')
+        else:
+            prefix = ''
+            
         if obj.__class__ is str:
             if not isindex and obj == idxfile:
-                if self.toplevel: 
-                    link = os.path.join('..', '..', obj)
-                else: link = os.path.join('..', obj)
+                ## A page linking up to the index file, which is one dir up
+                link = os.path.join('..', obj)
+            elif isrss:
+                ## An RSS page asking for a toplevel link
+                link = os.path.join(prefix, rssfile)
             else:
+                ## A page linking to another page, usually .css
                 link = os.path.join(prefix, obj)
         elif obj.__class__ is Package:
             link = os.path.join(prefix, pkgfile % obj.pkgid)
         elif obj.__class__ is Group:
             link = os.path.join(prefix, grfile % obj.grid)
         elif obj.__class__ is Archer:
-            if isindex and self.toplevel:
-                link = os.path.join('..', obj.loc)
-            else:
-                link = os.path.join('..', '..', obj.loc)
+            # loc is taken from the REPOMD files and is relative to
+            # the repo directory, so we get out of repodata subdir.
+            link = os.path.join('..', '..', obj.loc)
+        else:
+            ## No idea
+            link = '#'
         return link
 
     def _smartWrite(self, outfile, strdata):
@@ -633,15 +647,16 @@ class RepoView:
         fh.close()
         return 1        
 
-    def applyTemplates(self, templatedir, toplevel=0, title='RepoView'):
+    def applyTemplates(self, templatedir, title='RepoView', 
+                       url='http://localhost'):
         """
         Just what it says. :)
         """
         if not self.packages:
             _say('No packages available.')
             sys.exit(0)
-        gentime = time.strftime('%c')
-        self.toplevel = toplevel
+        gentime = time.ctime()
+        self.url = url
         self._makeExtraGroups()
         self._mkOutDir(templatedir)
         stats = {
@@ -652,7 +667,8 @@ class RepoView:
             'archlist': self.arches,
             'ignorearchlist': self.xarch,
             'VERSION': VERSION,
-            'gentime': gentime
+            'gentime': gentime,
+            'dorss': url
             }
         ## Do groups
         grtmpl = os.path.join(templatedir, grkid)
@@ -699,20 +715,52 @@ class RepoView:
                 p += 1
             _say('writing packages: %s written, %s preserved\r' % (w, p))
         _say('\n', 1)
+                
         ## Do index
         _say('generating index...', 1)
         idxtmpl = os.path.join(templatedir, idxkid)
         self.arches.sort()
         kobj = Template(file=idxtmpl, mkLinkUrl=self.mkLinkUrl,
             letters=self.letters, groups=self.groups, stats=stats)
-        if self.toplevel: 
-            out = os.path.join(self.repodir, idxfile)
-        else: 
-            out = os.path.join(self.repodir, 'repodata', idxfile)
+        out = os.path.join(self.repodir, 'repodata', idxfile)
         fh = open(out, 'w')
         kobj.write(out)
         fh.close()
         _say('done\n')
+
+        ## Do RSS feed
+        if self.url is not None:
+            _say('generating rss feed...', 1)
+            isoformat = '%a, %d %b %Y %H:%M:%S %z'
+            out = os.path.join(self.repodir, 'repodata', rssfile)
+            w = XMLWriter(out, 'utf-8')
+            rss = w.start('rss', version='2.0')
+            w.start('channel')
+            w.element('title', 'Repoview: %s' % title)
+            w.element('link', '%s/repodata/%s' % (url, rssfile))
+            w.element('description', 'Latest packages for %s' % title)
+            w.element('lastBuildDate', time.strftime(isoformat))
+            w.element('generator', 'Repoview-%s' % VERSION)
+            rsstmpl = os.path.join(templatedir, rsskid)
+            kobj = Template(file=rsstmpl, stats=stats, 
+                            mkLinkUrl=self.mkLinkUrl)
+            for pkg in self.groups['__latest__'].getSortedList(trim=0):
+                w.start('item')
+                w.element('guid', self.mkLinkUrl(pkg, isrss=1))
+                w.element('link', self.mkLinkUrl(pkg, isrss=1))
+                w.element('pubDate', pkg.getTime(isoformat))
+                w.element('title', '%s update: %s-%s-%s' 
+                           % (title, pkg.n, pkg.v, pkg.r))
+                w.element('category', pkg.n)
+                w.element('category', pkg.group.name)
+                kobj.package = pkg
+                description = kobj.serialize()
+                w.element('description', description)
+                w.end()
+            w.end()
+            w.close(rss)
+            _say('done\n')
+        
         _say('writing checksum...', 1)
         chkfile = os.path.join(self.outdir, 'checksum')
         fh = open(chkfile, 'w')
@@ -725,87 +773,56 @@ class RepoView:
         shutil.move(self.outdir, self.olddir)
         _say('done\n')
 
-def usage(ecode=0):
-    "Print usage and exit with ecode passed"
-    sys.stderr.write("""
-    repoview [-i name] [-x arch] [-k dir] [-l title] [-t] [-f] [-q] [repodir]
-    This will make your repository browseable
-    -i name
-        Optionally ignore this package -- can be a shell-style glob.
-        This is useful for excluding debuginfo packages:
-        -i *debuginfo* -i *doc*
-        The globbing will be done against name-epoch-version-release, 
-        e.g. foo-0-1.0-1
-    -x arch
-        Optionally exclude this arch. E.g.:
-        -x src -x ia64
-    -k templatedir
-        Use an alternative directory with kid templates instead of
-        the default: %s
-        The template directory must contain three required template 
-        files: index.kid, group.kid, package.kid and the
-        "layout" dir which will be copied into the repoview directory.
-    -l title
-        Describe the repository in a few words. By default, "RepoView" is used.
-        E.g.:
-        -l "Extras for Fedora Core 3 x86"
-    -t
-        Place the index.html into the top level of the repodir, instead of 
-        just in repodata/index.html.
-    -f
-        Regenerate the pages even if the repomd checksum hasn't changed.
-    -q
-        Do not output anything except fatal errors.
-    -V, --version
-        Print version number and exit.
-    -h, -?, --help
-        Print this usage message.
-    repodir
-        Where to look for the 'repodata' directory.\n""" % DEFAULT_TEMPLATEDIR)
-    sys.exit(ecode)
-
-def main(args):
+def main():
     "Main program code"
     global quiet #IGNORE:W0121
-    if not args: 
-        usage()
-    ignore = []
-    xarch = []
-    toplevel = 0
-    templatedir = DEFAULT_TEMPLATEDIR
-    title = 'RepoView'
-    force = 0
-    try:
-        gopts, cmds = getopt.getopt(args, 'i:x:k:l:tfqh?V', ['help', 'version'])
-        for o, a in gopts:
-            if o == '-i': 
-                ignore.append(a)
-            elif o == '-x': 
-                xarch.append(a)
-            elif o == '-k': 
-                templatedir = a
-            elif o == '-l': 
-                title = a
-            elif o == '-t': 
-                toplevel = 1
-            elif o == '-f': 
-                force = 1
-            elif o == '-q': 
-                quiet = 1
-            elif o == '-V' or o == '--version':
-                print VERSION
-                sys.exit(0)
-            else: usage()
-        if not cmds: 
-            usage(1)
-        repodir = cmds[0]
-    except getopt.error, e:
-        print "Error: %s" % e
-        usage(1)
-    if templatedir is None:
-        templatedir = os.path.join(repodir, 'templates')
-    rv = RepoView(repodir, ignore=ignore, xarch=xarch, force=force)
-    rv.applyTemplates(templatedir, toplevel=toplevel, title=title)
+    usage = 'usage: %prog [options]'
+    parser = OptionParser(usage=usage, version='%prog ' + VERSION)
+    parser.add_option('-i', '--ignore-package', dest='ignore', action='append',
+        default=[],
+        help='Optionally ignore this package -- can be a shell-style glob. '
+        'This is useful for excluding debuginfo packages, e.g.: '
+        '"-i *debuginfo* -i *doc*". '
+        'The globbing will be done against name-epoch-version-release, '
+        'e.g.: "foo-0-1.0-1"')
+    parser.add_option('-x', '--exclude-arch', dest='xarch', action='append',
+        default=[],
+        help='Optionally exclude this arch. E.g.: "-x src -x ia64"')
+    parser.add_option('-k', '--template-dir', dest='templatedir',
+        default=DEFAULT_TEMPLATEDIR,
+        help='Use an alternative directory with kid templates instead of '
+        'the default: %default. The template directory must contain four '
+        'required template files: index.kid, group.kid, package.kid, rss.kid '
+        'and the "layout" dir which will be copied into the repoview directory')
+    parser.add_option('-t', '--title', dest='title', 
+        default='RepoView',
+        help='Describe the repository in a few words. '
+        'By default, "%default" is used. '
+        'E.g.: -t "Extras for Fedora Core 4 x86"')
+    parser.add_option('-l', '--title-deprecated', dest='dtitle',
+        default=None,
+        help='This option is deprecated. Please use -t.')
+    parser.add_option('-u', '--url', dest='url',
+        default=None,
+        help='Repository URL to use when generating the RSS feed. E.g.: '
+        '-u "http://fedoraproject.org/extras/4/i386". Leaving it off will '
+        'skip the rss feed generation')
+    parser.add_option('-f', '--force', dest='force', action='store_true',
+        default=0,
+        help='Regenerate the pages even if the repomd checksum has not changed')
+    parser.add_option('-q', '--quiet', dest='quiet', action='store_true',
+        default=0,
+        help='Do not output anything except fatal errors.')
+    (opts, args) = parser.parse_args()
+    if not args:
+        parser.error('Incorrect invocation.')
+    if opts.dtitle is not None:
+        opts.title = opts.dtitle
+        print 'Option -l is deprecated. Please use -t or --title'
+    repodir = args[0]
+    rv = RepoView(repodir, ignore=opts.ignore, xarch=opts.xarch, 
+                  force=opts.force)
+    rv.applyTemplates(opts.templatedir, title=opts.title, url=opts.url)
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    main()

@@ -1,3 +1,13 @@
+Version 0.5:
+	* Switch to optparse. This may break older Pythons, not sure.
+	* Dropped "-t toplevel" switch, since it complicated the code
+	  a lot and not used by anyone, to my knowledge.
+	* Moved "-l title" to "-t title" with a deprecation note in place.
+	* Added RSS generation routines. Template for the entries is in
+	  kid.rss. Feed published into repodata/latest-feed.xml. To enable
+	  rss feed generation, pass a "-u URL" flag (repoview has no other way
+	  of knowing where your data will be published).
+
 Version 0.4.1
 	* Add -V, --version, -h, and -? command-line options 
 	  (#504, patch by Ville Skyttä)
