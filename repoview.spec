@@ -54,7 +54,7 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
-* Fri Jan 13 2005 Konstantin Ryabitsev <icon@fedoraproject.org> - 0.5-1
+* Fri Jan 13 2006 Konstantin Ryabitsev <icon@fedoraproject.org> - 0.5-1
 - Version 0.5
 
 * Fri Oct 07 2005 Konstantin Ryabitsev <icon@linux.duke.edu> - 0.4.1-1
