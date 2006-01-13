@@ -37,3 +37,4 @@ Version 0.2
     * Rename __orphans__ to __nogroup__
     * Add a simple manpage
     * Check for repomd.xml before trying to parse it
+

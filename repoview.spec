@@ -3,7 +3,7 @@
 Name:           repoview
 Version:        0.5
 Release:        1
-Summary:        Creates a set of static HTML pages in a yum repository.
+Summary:        Creates a set of static HTML pages in a yum repository
 
 Group:          Applications/System
 License:        GPL
