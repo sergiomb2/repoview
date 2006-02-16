@@ -39,12 +39,12 @@ from optparse import OptionParser
 from elementtree.SimpleXMLWriter import XMLWriter
 
 try:
-    from yum.comps import Comps
+    from yum.comps import Comps, CompsException
     from yum.mdparser import MDParser
     from repomd.repoMDObject import RepoMD
 except ImportError:
     try:
-        from noyum.comps import Comps #IGNORE:F0401
+        from noyum.comps import Comps, CompsException #IGNORE:F0401
         from noyum.mdparser import MDParser #IGNORE:F0401
         from noyum.repoMDObject import RepoMD #IGNORE:F0401
     except ImportError:
@@ -71,7 +71,7 @@ idxfile = 'index.html'
 rsskid = 'rss.kid'
 rssfile = 'latest-feed.xml'
 
-VERSION = '0.5'
+VERSION = '0.5.1'
 DEFAULT_TEMPLATEDIR = './templates'
 
 emailre = re.compile('<.*?@.*?>')
@@ -369,17 +369,37 @@ class RepoView:
         """
         _say('parsing comps...', 1)
         loc = self.repodata['group']['relativepath']
-        groups = Comps(os.path.join(self.repodir, loc)).groups.values()
+        comps = Comps()
+        try:
+            comps.add(os.path.join(self.repodir, loc))
+            groups = comps.groups
+            comps.isold = 0
+        except AttributeError:
+            # Must be dealing with yum < 2.5
+            try:
+                comps.load(os.path.join(self.repodir, loc))
+                groups = comps.groups.values()
+                comps.isold = 1
+            except CompsException:
+                print 'Error parsing %s!' % loc
+                print 'You may be trying to parse the new comps format'
+                print 'with old yum libraries. Falling back to RPM groups.'
+                return
         namemap = self._getNameMap()
         pct = 0
         for entry in groups:
             pct += 1
             group = Group()
-            group.grid = _mkid(entry.id)
+            if comps.isold:
+                group.grid = _mkid(entry.id)
+                packages = entry.packages.keys()
+            else:
+                group.grid = _mkid(entry.groupid)
+                packages = entry.packages
             group.name = _webify(entry.name)
             group.description = _webify(entry.description)
             group.uservisible = entry.user_visible
-            for pkgname in entry.packages.keys():
+            for pkgname in packages:
                 if pkgname in namemap.keys():
                     pkglist = namemap[pkgname]
                     group.packages += pkglist

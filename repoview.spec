@@ -1,7 +1,7 @@
 # $Id$
 
 Name:           repoview
-Version:        0.5
+Version:        0.5.1
 Release:        1
 Summary:        Creates a set of static HTML pages in a yum repository
 
@@ -54,6 +54,9 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
+* Wed Feb 15 2006 Konstantin Ryabitsev <icon@fedoraproject.org> - 0.5.1-1
+- Version 0.5.1
+
 * Fri Jan 13 2006 Konstantin Ryabitsev <icon@fedoraproject.org> - 0.5-1
 - Version 0.5
 

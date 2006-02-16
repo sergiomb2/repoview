@@ -6,15 +6,18 @@ format that's easily browsable via http by creating a set of static HTML pages.
 REQUIREMENTS:
 -------------
 * Kid templating engine (0.6.3 or above)
-* Yum 2.3 or above. If you don't have yum, or can't easily install that version of yum
-  on your machine, get a copy of yum-2.4.x (http://linux.duke.edu/projects/yum/), 
-  and do the following:
+* Yum 2.3 or above. If you don't have yum, or can't easily install that version 
+  of yum on your machine, get a copy of yum-2.4.x or yum-2.5.x 
+  (http://linux.duke.edu/projects/yum/), and do the following:
   - create a directory called "noyum" either in the subdirectory of this program
     or in /usr/lib/python2.x/site-packages.
   - from the yum tree, copy the files yum/comps.py, yum/mdparser.py,
-    repomd/mdErrors.py, repomd/repoMDObject.py into the noyum directory
+    repomd/mdErrors.py, repomd/repoMDObject.py (and yum/constants.py 
+    if using yum-2.5.x) into the noyum directory
   - in the noyum directory, run "touch __init__.py"
   You will need to make sure you install python-elementtree.
+  
+NB: New-style comps.xml require yum libraries version 2.5 and above.
 
 AUTHORS:
 --------

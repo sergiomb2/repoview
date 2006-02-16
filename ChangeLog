@@ -1,3 +1,6 @@
+Version 0.5.1:
+	* Hack around the comps.xml API changes in yum-2.5.x
+
 Version 0.5:
 	* Switch to optparse. This may break older Pythons, not sure.
 	* Dropped "-t toplevel" switch, since it complicated the code
