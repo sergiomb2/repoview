@@ -51,6 +51,12 @@ except ImportError:
         print "No yum parsing routines found. Please see README."
         sys.exit(1)
 
+try:
+    from rpmUtils.miscutils import compareEVR
+except ImportError:
+    # No rpmUtils, fall back to simple string based sort
+    def compareEVR(x, y): return cmp("%s-%s-%s" % x, "%s-%s-%s" % y)
+
 from kid import Template
 ##
 # Kid generates a FutureWarning on python 2.3
@@ -71,7 +77,7 @@ idxfile = 'index.html'
 rsskid = 'rss.kid'
 rssfile = 'latest-feed.xml'
 
-VERSION = '0.5.1'
+VERSION = '0.6'
 DEFAULT_TEMPLATEDIR = './templates'
 
 emailre = re.compile('<.*?@.*?>')
@@ -127,7 +133,7 @@ class Archer:
         self.time = int(pkgdata['time_build'])
         self.size = int(pkgdata['size_archive'])
         self.loc = pkgdata['location_href']
-        self.packager = pkgdata['packager']
+        self.packager = _webify(pkgdata['packager'])
 
     def getFileName(self):
         """
@@ -175,6 +181,13 @@ class Package:
         self.incomplete = 1
         self.changelogs = []
         
+    def __cmp__(self, other):
+        """
+        Compare a ourselves by NEVR with another package.
+        """
+        return (cmp(self.n, other.n) or
+            compareEVR((self.e, self.v, self.r), (other.e, other.v, other.r)))
+
     def doPackage(self, pkgdata):
         """
         Accept a dict with key-value pairs and populate ourselves with it.
@@ -205,7 +218,7 @@ class Package:
         self.description = pkgdata['description']
         self.url = pkgdata['url']
         self.license = pkgdata['license']
-        self.vendor = pkgdata['vendor']
+        self.vendor = _webify(pkgdata['vendor'])
         self.rpmgroup = pkgdata['group']
         self.incomplete = 0
 
@@ -279,15 +292,7 @@ class Group:
         to trim.
         """
         if not self.sorted:
-            nevrlist = {}
-            for package in self.packages:
-                nevrlist[package.nevr] = package
-            keys = nevrlist.keys()
-            keys.sort()
-            retlist = []
-            for nevr in keys:
-                retlist.append(nevrlist[nevr])
-            self.packages = retlist
+            self.packages.sort()
             self.sorted = 1
         if not trim or len(self.packages) <= trim: 
             return self.packages
@@ -596,7 +601,7 @@ class RepoView:
         """
         if os.path.isdir(self.outdir):
             _say('deleting garbage dir...', 1)
-            shutil.rmtree(self.outdir)
+            os.removedirs(self.outdir)
             _say('done\n', 1)
         os.mkdir(self.outdir)
         layoutsrc = os.path.join(templatedir, 'layout')
@@ -673,7 +678,7 @@ class RepoView:
         Just what it says. :)
         """
         if not self.packages:
-            _say('No packages available.')
+            _say('No packages available.\n')
             sys.exit(0)
         gentime = time.ctime()
         self.url = url
@@ -788,14 +793,14 @@ class RepoView:
         _say('done\n')
         _say('Moving new repoview dir in place...', 1)
         if os.path.isdir(self.olddir):
-            shutil.rmtree(self.olddir)
-        shutil.move(self.outdir, self.olddir)
+            os.removedirs(self.olddir)
+        os.rename(self.outdir, self.olddir)
         _say('done\n')
 
 def main():
     "Main program code"
     global quiet #IGNORE:W0121
-    usage = 'usage: %prog [options]'
+    usage = 'usage: %prog [options] repodir'
     parser = OptionParser(usage=usage, version='%prog ' + VERSION)
     parser.add_option('-i', '--ignore-package', dest='ignore', action='append',
         default=[],
@@ -838,6 +843,7 @@ def main():
     if opts.dtitle is not None:
         opts.title = opts.dtitle
         print 'Option -l is deprecated. Please use -t or --title'
+    quiet = opts.quiet
     repodir = args[0]
     rv = RepoView(repodir, ignore=opts.ignore, xarch=opts.xarch, 
                   force=opts.force)

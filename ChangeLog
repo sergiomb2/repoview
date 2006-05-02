@@ -1,3 +1,9 @@
+Version 0.6:
+	* Webify more strings (Eric Lassauge)
+	* Use os.* functions for most shutil calls for older python (#551)
+	* Don't ignore --quiet (#589)
+	* Misc small fixes (#588, #590)
+
 Version 0.5.1:
 	* Hack around the comps.xml API changes in yum-2.5.x
 
