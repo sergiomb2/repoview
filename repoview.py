@@ -24,6 +24,7 @@ directory, to make it easily browseable.
 # Copyright (C) 2006 by McGill University, http://www.mcgill.ca/
 # Author: Konstantin Ryabitsev <icon@fedoraproject.org>
 #
+#pylint: disable-msg=F0401
 
 __revision__ = '$Id$'
 
@@ -44,9 +45,9 @@ try:
     from repomd.repoMDObject import RepoMD
 except ImportError:
     try:
-        from noyum.comps import Comps, CompsException #IGNORE:F0401
-        from noyum.mdparser import MDParser #IGNORE:F0401
-        from noyum.repoMDObject import RepoMD #IGNORE:F0401
+        from noyum.comps import Comps, CompsException
+        from noyum.mdparser import MDParser
+        from noyum.repoMDObject import RepoMD
     except ImportError:
         print "No yum parsing routines found. Please see README."
         sys.exit(1)
@@ -55,7 +56,8 @@ try:
     from rpmUtils.miscutils import compareEVR
 except ImportError:
     # No rpmUtils, fall back to simple string based sort
-    def compareEVR(x, y): return cmp("%s-%s-%s" % x, "%s-%s-%s" % y)
+    def compareEVR(x, y): 
+        return cmp("%s-%s-%s" % x, "%s-%s-%s" % y)
 
 from kid import Template
 ##
@@ -77,7 +79,7 @@ idxfile = 'index.html'
 rsskid = 'rss.kid'
 rssfile = 'latest-feed.xml'
 
-VERSION = '0.6'
+VERSION = '0.5.2'
 DEFAULT_TEMPLATEDIR = './templates'
 
 emailre = re.compile('<.*?@.*?>')
@@ -296,7 +298,6 @@ class Group:
             self.sorted = 1
         if not trim or len(self.packages) <= trim: 
             return self.packages
-        retlist = []
         i = 0
         for pkg in self.packages:
             if pkg.nevr == nevr: 
