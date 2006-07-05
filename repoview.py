@@ -602,7 +602,7 @@ class RepoView:
         """
         if os.path.isdir(self.outdir):
             _say('deleting garbage dir...', 1)
-            os.removedirs(self.outdir)
+            shutil.rmtree(self.outdir)
             _say('done\n', 1)
         os.mkdir(self.outdir)
         layoutsrc = os.path.join(templatedir, 'layout')
@@ -794,7 +794,7 @@ class RepoView:
         _say('done\n')
         _say('Moving new repoview dir in place...', 1)
         if os.path.isdir(self.olddir):
-            os.removedirs(self.olddir)
+            shutil.rmtree(self.olddir)
         os.rename(self.outdir, self.olddir)
         _say('done\n')
 

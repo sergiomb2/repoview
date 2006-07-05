@@ -1,6 +1,6 @@
 Version 0.5.2:
 	* Webify more strings (Eric Lassauge)
-	* Use os.* functions for most shutil calls for older python (#551)
+	* Use os.* functions for some shutil calls for older python (#551)
 	* Don't ignore --quiet (#589)
 	* Misc small fixes (#588, #590)
 	* Drop specfile from the tarball
