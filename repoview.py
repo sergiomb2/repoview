@@ -749,7 +749,7 @@ class Repoview:
             if sys.version_info[:2] == (2, 5):
                 from xml.etree.cElementTree import ElementTree, TreeBuilder
             else:
-                from elementtree.cElementTree import ElementTree, TreeBuilder
+                from cElementTree import ElementTree, TreeBuilder
             _say('generating rss feed...', 1)
             isoformat = '%a, %d %b %Y %H:%M:%S %z'
             tb = TreeBuilder()
@@ -871,17 +871,17 @@ def main():
         help='Repository URL to use when generating the RSS feed. E.g.: '
         '-u "http://fedoraproject.org/extras/4/i386". Leaving it off will '
         'skip the rss feed generation')
+    parser.add_option('-s', '--srpm-url', dest='srpmurl',
+        default=None,
+        help='Repository base URL for Source RPM packages. E.g.: '
+        '-s "http://fedoraproject.org/extras/4/SRPMS". Leaving it off will '
+        'not link src.rpm packages from binary package page')
     parser.add_option('-f', '--force', dest='force', action='store_true',
         default=0,
         help='Regenerate the pages even if the repomd checksum has not changed')
     parser.add_option('-q', '--quiet', dest='quiet', action='store_true',
         default=0,
         help='Do not output anything except fatal errors.')
-    parser.add_option('-s', '--srpm-url', dest='srpmurl',
-        default=None,
-        help='Repository base URL for Source RPM packages. E.g.: '
-        '-s "http://fedoraproject.org/extras/4/SRPMS". Leaving it off will '
-        'not link src.rpm packages from binary package page')
     (opts, args) = parser.parse_args()
     if not args:
         parser.error('Incorrect invocation.')
