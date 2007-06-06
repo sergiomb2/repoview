@@ -1,4 +1,5 @@
 #!/usr/bin/python -tt
+# -*- mode: Python; indent-tabs-mode: nil; -*-
 """
 Repoview is a small utility to generate static HTML pages for a repodata
 directory, to make it easily browseable.
@@ -37,12 +38,20 @@ import time
 import zlib
 
 from optparse import OptionParser
-from elementtree.SimpleXMLWriter import XMLWriter
 
+oldrepomd = False
+try:
+    from yum.repoMDObject import RepoMD
+except ImportError:
+    try:
+        from repomd.repoMDObject import RepoMD
+        oldrepomd = True
+    except ImportError:
+        print "No Yum RepoMD module found."
+        sys.exit(1)
 try:
     from yum.comps import Comps, CompsException
     from yum.mdparser import MDParser
-    from repomd.repoMDObject import RepoMD
 except ImportError:
     try:
         from noyum.comps import Comps, CompsException
@@ -67,6 +76,9 @@ if sys.version_info[0] == 2 and sys.version_info[1] == 3:
     import warnings
     warnings.filterwarnings('ignore', category=FutureWarning)
 
+# pass this via options
+srpmbaseurl = None
+
 ##
 # Some hardcoded constants
 #
@@ -76,11 +88,12 @@ grkid = 'group.kid'
 grfile = '%s.group.html'
 idxkid = 'index.kid'
 idxfile = 'index.html'
+redirfile = 'redirect.html'
 rsskid = 'rss.kid'
 rssfile = 'latest-feed.xml'
 
-VERSION = '0.5.2'
-DEFAULT_TEMPLATEDIR = './templates'
+VERSION = '0.6'
+DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
 emailre = re.compile('<.*?@.*?>')
 def _webify(text):
@@ -108,7 +121,7 @@ def _say(text, flush=0):
     """
     Unless in quiet mode, output the text passed.
     """
-    if quiet: 
+    if quiet:
         return
     sys.stdout.write(text)
     if flush: 
@@ -122,21 +135,81 @@ def _mkid(text):
     text = text.replace(' ', '')
     return text
 
-## Jonathan :)
-class Archer:
+class Package:
     """
-    This class handles all possible architectures for a package, since
-    the listing is done by n-e-v-r.html, and a single release can have more
-    than one architecture available, e.g. "src". This is effectively where
-    all packages end up being: there are no further sublevels.
+    A bit of a misnomer -- this is "package" in the sense of repoview, not in 
+    the sense of an .rpm file, since it will include multiple architectures.
     """
     def __init__(self, pkgdata):
+        (n,e,v,r) = (pkgdata['name'],pkgdata['epoch'],pkgdata['ver'],
+                     pkgdata['rel'])
+        self.evr = (e, v, r)
+        self.n = n
+        self.e = e
+        self.v = v
+        self.r = r
         self.arch = pkgdata['arch']
+        self.group = None
+        self.rpmgroup = None
+        self.summary = None
+        self.description = None
+        self.url = None
+        self.license = None
+        self.vendor = None
+        self.changelogs = []
+
+        self.summary = pkgdata['summary']
+        self.description = pkgdata['description']
+        self.url = pkgdata['url']
+        self.license = pkgdata['license']
+        self.vendor = _webify(pkgdata['vendor'])
+        self.rpmgroup = pkgdata['group']
+
+        self.sourcerpm = pkgdata['sourcerpm']
+        self.sourceurl = None
+        self.sourcename = self._getSourceName()
+        if srpmbaseurl and self.sourcename:
+            self.sourceurl = os.path.join(srpmbaseurl,'repoview/%s.html'%self.sourcename)
+
+        self.pkgid = pkgdata['pkgId']  # checksum
+        
         self.time = int(pkgdata['time_build'])
         self.size = int(pkgdata['size_archive'])
         self.loc = pkgdata['location_href']
         self.packager = _webify(pkgdata['packager'])
 
+    def __str__(self):
+        return '%s-%s-%s.%s' % (self.n,self.v,self.r,self.arch)
+    
+    def __cmp__(self, other):
+        """
+        Compare a ourselves by NEVR with another package.
+        """
+        return (cmp(self.n, other.n) or
+            compareEVR((self.e, self.v, self.r), (other.e, other.v, other.r)))
+
+    def addChangelogs(self, changelogs):
+        """
+        Accept changelogs from other-parser and assign them, unless we
+        already have some (sometimes happens with multiple architectures).
+        """
+        if self.changelogs: 
+            return 0
+        self.changelogs = changelogs
+        return 1
+    
+    def getChangeLogs(self):
+        """
+        Get the changelogs in the [c-formatted date, author, entry] style.
+        """
+        retlist = []
+        for changelog in self.changelogs:
+            author = _webify(changelog['author'])
+            date = time.strftime('%c', time.localtime(int(changelog['date'])))
+            entry = _webify(changelog['value'])
+            retlist.append ([date, author, entry])
+        return retlist
+        
     def getFileName(self):
         """
         Get the basename of the RPM file in question.
@@ -155,98 +228,24 @@ class Archer:
         You can access the byte size of the package by looking at arch.size,
         but this will return the size in sane units (KiB or MiB).
         """
+        if self.size < 1024:
+            return '%d Bytes' % self.size
         kbsize = self.size/1024
         if kbsize/1024 < 1:
             return '%d KiB' % kbsize
         else:
             return '%0.2f MiB' % (float(kbsize)/1024)
 
-class Package:
-    """
-    A bit of a misnomer -- this is "package" in the sense of repoview, not in 
-    the sense of an .rpm file, since it will include multiple architectures.
-    """
-    def __init__(self, n, e, v, r):
-        self.nevr = (n, e, v, r)
-        self.n = n
-        self.e = e
-        self.v = v
-        self.r = r
-        self.group = None
-        self.rpmgroup = None
-        self.summary = None
-        self.description = None
-        self.url = None
-        self.license = None
-        self.vendor = None
-        self.arches = {}
-        self.incomplete = 1
-        self.changelogs = []
-        
-    def __cmp__(self, other):
-        """
-        Compare a ourselves by NEVR with another package.
-        """
-        return (cmp(self.n, other.n) or
-            compareEVR((self.e, self.v, self.r), (other.e, other.v, other.r)))
+    def _getSourceName(self):
+        if not self.sourcerpm:
+            return None
+        i = self.sourcerpm.rfind('-')
+        if i > 0:
+            i = self.sourcerpm[:i].rfind('-')
+            if i > 0:
+                return self.sourcerpm[:i]
+        return None
 
-    def doPackage(self, pkgdata):
-        """
-        Accept a dict with key-value pairs and populate ourselves with it.
-        """
-        if self.incomplete: 
-            self._getPrimary(pkgdata)
-        pkgid = pkgdata['pkgId']
-        if self.arches.has_key(pkgid): 
-            return
-        arch = Archer(pkgdata)
-        self.arches[pkgid] = arch
-
-    def addChangelogs(self, changelogs):
-        """
-        Accept changelogs from other-parser and assign them, unless we
-        already have some (sometimes happens with multiple architectures).
-        """
-        if self.changelogs: 
-            return 0
-        self.changelogs = changelogs
-        return 1
-    
-    def _getPrimary(self, pkgdata):
-        """
-        A helper method to grab values from pkgdata dict.
-        """
-        self.summary = pkgdata['summary']
-        self.description = pkgdata['description']
-        self.url = pkgdata['url']
-        self.license = pkgdata['license']
-        self.vendor = _webify(pkgdata['vendor'])
-        self.rpmgroup = pkgdata['group']
-        self.incomplete = 0
-
-    def getChangeLogs(self):
-        """
-        Get the changelogs in the [c-formatted date, author, entry] style.
-        """
-        retlist = []
-        for changelog in self.changelogs:
-            author = _webify(changelog['author'])
-            date = time.strftime('%c', time.localtime(int(changelog['date'])))
-            entry = _webify(changelog['value'])
-            retlist.append ([date, author, entry])
-        return retlist
-        
-    def getTime(self, format='%c'):
-        """
-        Convenience method for templates. Returns the latest buildtime from
-        all available arches, formatted as requested.
-        """
-        btime = 0
-        for arch in self.arches.values():
-            if arch.time > btime:
-                btime = arch.time
-        date = time.strftime(format, time.localtime(btime))
-        return date
 
 class GroupFactory(dict):
     """
@@ -279,12 +278,26 @@ class Group:
     """
     def __init__(self, grid=None, name=None):
         self.packages = []
+        self.pkgnames = []
         self.grid = grid
         self.name = name
-        self.sorted = 0
+        self.sorted = False
         self.uservisible = 1
 
-    def getSortedList(self, trim=0, nevr=None):
+    def __str__(self):
+        return self.name
+
+    def add(self, package):
+        """
+        Add a package name and an exemplary package object to a group.
+        The package object can be used to access details other than the
+        package name.
+        """
+        if package.n not in self.pkgnames:
+            self.pkgnames.append(package.n)
+            self.packages.append(package)
+
+    def getSortedList(self, trim=0, name=None):
         """
         A utility method for calling from kid templates. This will
         return a sorted list of packages, optionally trimmed since
@@ -295,12 +308,12 @@ class Group:
         """
         if not self.sorted:
             self.packages.sort()
-            self.sorted = 1
+            self.sorted = True
         if not trim or len(self.packages) <= trim: 
             return self.packages
         i = 0
         for pkg in self.packages:
-            if pkg.nevr == nevr: 
+            if pkg.n == name: 
                 break
             i += 1
         half = trim/2
@@ -310,7 +323,7 @@ class Group:
             return self.packages[-trim:]
         return self.packages[i-half:i+half]        
        
-class RepoView:
+class Repoview:
     """
     The base class.
     """
@@ -321,8 +334,9 @@ class RepoView:
         self.arches = []
         self.force = force
         self.url = None
-        self.olddir = os.path.join(self.repodir, 'repodata', 'repoview')
-        self.outdir = os.path.join(self.repodir, 'repodata', '.repoview.new')
+        self.homedir = os.path.join(self.repodir, 'repoview')
+        self.outdirname = '.new'
+        self.outdir = os.path.join(self.homedir, self.outdirname)
         self.packages = {}
         self.csums = {}
         self.groups = GroupFactory()
@@ -343,6 +357,7 @@ class RepoView:
         ## Do packages (primary.xml and other.xml)
         self._getPrimary()
         self._getOther()
+        self._sortPackages()
         ## Do groups and resolve them
         if self.repodata.has_key('group'):
             self._getGroups()
@@ -357,16 +372,19 @@ class RepoView:
             return 1
         ## Check and get the existing repoview checksum file
         try:
-            chkfile = os.path.join(self.olddir, 'checksum')
+            chkfile = os.path.join(self.homedir, 'checksum')
             fh = open(chkfile, 'r')
             checksum = fh.read()
             fh.close()
         except IOError: 
             return 1
         checksum = checksum.strip()
-        if checksum != self.repodata['primary']['checksum'][1]: 
+        if oldrepomd:
+            if checksum != self.repodata['primary']['checksum'][1]:
+                return 1
+        elif checksum != self.repodata['primary'].checksum[1]: 
             return 1
-        _say("RepoView: Repository has not changed. Force the run with -f.\n")
+        _say("Repoview: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
 
     def _getGroups(self):
@@ -374,7 +392,10 @@ class RepoView:
         Utility method for parsing comps.xml.
         """
         _say('parsing comps...', 1)
-        loc = self.repodata['group']['relativepath']
+        if oldrepomd:
+            loc = self.repodata['group']['relativepath']
+        else:
+            loc = self.repodata['group'].location[1]
         comps = Comps()
         try:
             comps.add(os.path.join(self.repodir, loc))
@@ -391,7 +412,6 @@ class RepoView:
                 print 'You may be trying to parse the new comps format'
                 print 'with old yum libraries. Falling back to RPM groups.'
                 return
-        namemap = self._getNameMap()
         pct = 0
         for entry in groups:
             pct += 1
@@ -405,38 +425,24 @@ class RepoView:
             group.name = _webify(entry.name)
             group.description = _webify(entry.description)
             group.uservisible = entry.user_visible
-            for pkgname in packages:
-                if pkgname in namemap.keys():
-                    pkglist = namemap[pkgname]
-                    group.packages += pkglist
-                    for pkg in pkglist:
-                        pkg.group = group
+            for name in packages:
+                pkglist = self.packages.get(name,[])
+                for package in pkglist:
+                    group.add(package)
+                    package.group = group
             _say('\rparsing comps: %s groups' % pct)
             self.groups[group.grid] = group
         _say('...done\n', 1)
-
-    def _getNameMap(self):
-        """
-        Needed for group parsing: since only package names are listed in
-        <comps>, this maps names to package objects. The result is in the
-        format: {'pkgname': [pkgobject1, pkgobject2, ...]}.
-        """
-        namemap = {}
-        for pkgid in self.packages.keys():
-            package = self.packages[pkgid]
-            name = package.n
-            if name not in namemap.keys(): 
-                namemap[name] = [package]
-            else:
-                namemap[name].append(package)
-        return namemap
 
     def _getPrimary(self):
         """
         Utility method for processing primary.xml.
         """
         _say('parsing primary...', 1)
-        loc = self.repodata['primary']['relativepath']
+        if oldrepomd:
+            loc = self.repodata['primary']['relativepath']
+        else:
+            loc = self.repodata['primary'].location[1]
         mdp = MDParser(os.path.join(self.repodir, loc))
         ignored = 0
         for package in mdp:
@@ -454,44 +460,37 @@ class RepoView:
         to create a new package or add arches to existing ones, or ignore it
         outright.
         """
-        if not pkgdata or pkgdata['arch'] in self.xarch: 
-            return 0
-        if pkgdata['arch'] not in self.arches: 
-            self.arches.append(pkgdata['arch'])
+        name = pkgdata['name']
+        arch = pkgdata['arch']
+        if not pkgdata or arch in self.xarch: 
+            return False
+        if arch not in self.arches: 
+            self.arches.append(arch)
         ## We make a package here from pkgdata ##
-        (n, e, v, r) = (pkgdata['name'], pkgdata['epoch'], 
-                        pkgdata['ver'], pkgdata['rel'])
-        pkgid = self._mkpkgid(n, e, v, r)
-        if self._checkIgnore(pkgid): 
-            return 0
-        if self.packages.has_key(pkgid):
-            package = self.packages[pkgid]
-        else:
-            package = Package(n, e, v, r)
-            package.pkgid = pkgid
-            self.packages[pkgid] = package
-        package.doPackage(pkgdata)
-        self._recordCsums(package)
-        return 1
+        if self._checkIgnore(name): 
+            return False
+        package = Package(pkgdata)
+        self.packages.setdefault(name,[])
+        self.packages[name].append(package)
+        self.csums[package.pkgid] = package
+        return True
+
+    def _sortPackages(self):
+        def cmpevr(a,b):
+            return compareEVR(b.evr,a.evr)
+        for name in self.packages:
+            self.packages[name].sort(cmpevr)
         
-    def _checkIgnore(self, pkgid):
+    def _checkIgnore(self, name):
         """
-        Check if package id (n-e-v-r) matches the ignore globs passed
+        Check if package name matches the ignore globs passed
         via -i.
         """
         for glob in self.ignore:
-            if fnmatch.fnmatchcase(pkgid, glob): 
+            if fnmatch.fnmatchcase(name, glob): 
                 return 1
         return 0
         
-    def _recordCsums(self, package):
-        """
-        A small helper method to help map repodata package checksums to 
-        our representation of packages.
-        """
-        for csum in package.arches.keys():
-            self.csums[csum] = package
-    
     def _getPackageByCsum(self, csum):
         """
         Return our representation of a package by the repodata checksum
@@ -507,7 +506,10 @@ class RepoView:
         Utility method to get data from other.xml.
         """
         _say('parsing other...', 1)
-        loc = self.repodata['other']['relativepath']
+        if oldrepomd:
+            loc = self.repodata['other']['relativepath']
+        else:
+            loc = self.repodata['other'].location[1]
         otherxml = os.path.join(self.repodir, loc)
         ignored = 0
         mdp = MDParser(otherxml)
@@ -521,12 +523,16 @@ class RepoView:
             _say('\rparsing other: %s packages, %s ignored' % 
                 (mdp.count, ignored))
         _say('...done\n', 1)
-        
-    def _mkpkgid(self, n, e, v, r):
-        """
-        Make the n-e-v-r package id out of n, e, v, r.
-        """
-        return '%s-%s-%s-%s' % (n, e, v, r)
+
+    def _setGroup(self,package):
+        grid = _mkid(package.rpmgroup)
+        if grid not in self.groups.keys():
+            group = Group(grid=grid, name=package.rpmgroup)
+            self.groups[grid] = group
+        else:
+            group = self.groups[grid]
+        package.group = group
+        group.add(package)
 
     def _makeExtraGroups(self):
         """
@@ -542,42 +548,33 @@ class RepoView:
                         name='Packages not in Groups')
         latest = []
         i = 0
-        makerpmgroups = 0
-        if not len(self.groups): 
-            makerpmgroups = 1
-        for pkgid in self.packages.keys():
-            package = self.packages[pkgid]
-            if package.group is None:
-                if makerpmgroups:
-                    grid = _mkid(package.rpmgroup)
-                    if grid not in self.groups.keys():
-                        group = Group(grid=grid, name=package.rpmgroup)
-                        self.groups[grid] = group
-                    else:
-                        group = self.groups[grid]
-                    package.group = group
-                    group.packages.append(package)
-                else:
+        makerpmgroups = (len(self.groups)<=0)
+        for pkglist in self.packages.values():
+            for package in pkglist:
+                if not package.group and makerpmgroups:
+                    self._setGroup(package)
+                elif not package.group:
                     package.group = nogroup
-                    nogroup.packages.append(package)
-            letter = pkgid[0].upper()
-            if letter not in self.letters.keys():
-                group = Group(grid=letter, name='Letter: %s' % letter)
-                self.letters[letter] = group
-            self.letters[letter].packages.append(package)
-            # btime is number of seconds since epoch, so reverse logic!
-            btime = 0
-            for arch in package.arches.values():
-                if arch.time > btime: 
-                    btime = arch.time
-            if len(latest) < self.maxlatest:
-                latest.append([btime, package])
-            else:
-                latest.sort()
-                latest.reverse()
-                if btime > latest[-1][0]:
-                    latest.pop()
-                    latest.append([btime, package])
+                    nogroup.add(package)
+
+                letter = package.n[0].upper()
+                if letter not in self.letters.keys():
+                    group = Group(grid=letter, name='Letter: %s' % letter)
+                    self.letters[letter] = group
+                self.letters[letter].add(package)
+
+                # btime is number of seconds since epoch, so reverse logic!
+                btime = 0
+                if package.time > btime: 
+                    btime = package.time
+                    if len(latest) < self.maxlatest:
+                        latest.append([btime, package])
+                    else:
+                        latest.sort()
+                        latest.reverse()
+                        if btime > latest[-1][0]:
+                            latest.pop()
+                            latest.append([btime, package])
             i += 1
             _say('\rcreating extra groups: %s entries' % i)
         if nogroup.packages:
@@ -588,7 +585,7 @@ class RepoView:
                        name='Last %s Packages Updated' % len(latest))
         for btime, package in latest:
             lgroup.packages.append(package)
-        lgroup.sorted = 1
+        lgroup.sorted = True
         self.groups[lgroup.grid] = lgroup
         _say('...done\n', 1)
         ## Prune empty groups
@@ -604,7 +601,7 @@ class RepoView:
             _say('deleting garbage dir...', 1)
             shutil.rmtree(self.outdir)
             _say('done\n', 1)
-        os.mkdir(self.outdir)
+        os.makedirs(self.outdir)
         layoutsrc = os.path.join(templatedir, 'layout')
         layoutdst = os.path.join(self.outdir, 'layout')
         if os.path.isdir(layoutsrc):
@@ -612,40 +609,31 @@ class RepoView:
             shutil.copytree(layoutsrc, layoutdst)
             _say('done\n', 1)
 
-    def mkLinkUrl(self, obj, isindex=0, isrss=0):
+    def mkLinkUrl(self, obj, isrss=0):
         """
         This is a utility method passed to kid templates. The templates use 
         it to get the link to a package, group, or layout object without
         having to figure things out on their own.
         """
-        if isindex and not isrss:
-            prefix = 'repoview'
-        elif isrss:
-            if isindex:
-                prefix = os.path.join(self.url, 'repodata')
-            else:
-                prefix = os.path.join(self.url, 'repodata', 'repoview')
+        if isrss:
+            prefix = os.path.join(self.url, 'repoview')
         else:
             prefix = ''
             
         if obj.__class__ is str:
-            if not isindex and obj == idxfile:
-                ## A page linking up to the index file, which is one dir up
-                link = os.path.join('..', obj)
-            elif isrss:
+            if isrss:
                 ## An RSS page asking for a toplevel link
                 link = os.path.join(prefix, rssfile)
+                ## A package in parent directory.
+            elif obj.endswith('.rpm'):
+                link = os.path.join('..',obj)
             else:
                 ## A page linking to another page, usually .css
                 link = os.path.join(prefix, obj)
         elif obj.__class__ is Package:
-            link = os.path.join(prefix, pkgfile % obj.pkgid)
+            link = os.path.join(prefix, pkgfile % obj.n)
         elif obj.__class__ is Group:
             link = os.path.join(prefix, grfile % obj.grid)
-        elif obj.__class__ is Archer:
-            # loc is taken from the REPOMD files and is relative to
-            # the repo directory, so we get out of repodata subdir.
-            link = os.path.join('..', '..', obj.loc)
         else:
             ## No idea
             link = '#'
@@ -656,7 +644,7 @@ class RepoView:
         First check if the strdata changed between versions. Write if yes.
         Move the old file if no.
         """
-        oldfile = os.path.join(self.olddir, outfile)
+        oldfile = os.path.join(self.homedir, outfile)
         newfile = os.path.join(self.outdir, outfile)
         if os.path.isfile(oldfile):
             fh = open(oldfile, 'r')
@@ -673,7 +661,7 @@ class RepoView:
         fh.close()
         return 1        
 
-    def applyTemplates(self, templatedir, title='RepoView', 
+    def applyTemplates(self, templatedir, title='Repoview', 
                        url='http://localhost'):
         """
         Just what it says. :)
@@ -704,7 +692,7 @@ class RepoView:
         p = 0
         for grid in self.groups.keys():            
             kobj.group = self.groups[grid]
-            outstr = kobj.serialize()
+            outstr = kobj.serialize(output='xhtml-strict')
             outfile = grfile % grid
             if self._smartWrite(outfile, outstr):
                 w += 1
@@ -717,7 +705,7 @@ class RepoView:
         p = 0
         for grid in self.letters.keys():
             kobj.group = self.letters[grid]
-            outstr = kobj.serialize()
+            outstr = kobj.serialize(output='xhtml-strict')
             outfile = grfile % grid
             if self._smartWrite(outfile, outstr):
                 w += 1
@@ -731,10 +719,10 @@ class RepoView:
         pkgtmpl = os.path.join(templatedir, pkgkid)
         kobj = Template(file=pkgtmpl, mkLinkUrl=self.mkLinkUrl,
                 letters=self.letters, stats=stats)
-        for pkgid in self.packages.keys():
-            kobj.package = self.packages[pkgid]
-            outstr = kobj.serialize()
-            outfile = pkgfile % pkgid
+        for pkglist in self.packages.values():
+            kobj.pkglist = pkglist
+            outstr = kobj.serialize(output='xhtml-strict')
+            outfile = pkgfile % pkglist[0].n
             if self._smartWrite(outfile, outstr):
                 w += 1
             else:
@@ -748,54 +736,105 @@ class RepoView:
         self.arches.sort()
         kobj = Template(file=idxtmpl, mkLinkUrl=self.mkLinkUrl,
             letters=self.letters, groups=self.groups, stats=stats)
-        out = os.path.join(self.repodir, 'repodata', idxfile)
+        out = os.path.join(self.outdir,idxfile)
         fh = open(out, 'w')
-        kobj.write(out)
+        kobj.write(out,output='xhtml-strict')
         fh.close()
+        out = os.path.join(self.repodir, 'repodata', idxfile)
+        shutil.copy(os.path.join(templatedir,redirfile),out)
         _say('done\n')
 
         ## Do RSS feed
         if self.url is not None:
+            if sys.version_info[:2] == (2, 5):
+                from xml.etree.cElementTree import ElementTree, TreeBuilder
+            else:
+                from elementtree.cElementTree import ElementTree, TreeBuilder
             _say('generating rss feed...', 1)
             isoformat = '%a, %d %b %Y %H:%M:%S %z'
-            out = os.path.join(self.repodir, 'repodata', rssfile)
-            w = XMLWriter(out, 'utf-8')
-            rss = w.start('rss', version='2.0')
-            w.start('channel')
-            w.element('title', title)
-            w.element('link', '%s/repodata/%s' % (url, rssfile))
-            w.element('description', 'Latest packages for %s' % title)
-            w.element('lastBuildDate', time.strftime(isoformat))
-            w.element('generator', 'Repoview-%s' % VERSION)
+            tb = TreeBuilder()
+            out = os.path.join(self.outdir,rssfile)
+            rss = tb.start('rss', {'version': '2.0'})
+            tb.start('channel')
+            tb.start('title')
+            tb.data(title)
+            tb.end('title')
+            tb.start('link')
+            tb.data('%s/repoview/%s' % (url, rssfile))
+            tb.end('link')
+            tb.start('description')
+            tb.data('Latest packages for %s' % title)
+            tb.end('description')
+            tb.start('lastBuildDate')
+            tb.data(time.strftime(isoformat))
+            tb.end('lastBuildDate')
+            tb.start('generator')
+            tb.data('Repoview-%s' % VERSION)
+            tb.end('generator')
+            
             rsstmpl = os.path.join(templatedir, rsskid)
             kobj = Template(file=rsstmpl, stats=stats, 
                             mkLinkUrl=self.mkLinkUrl)
             for pkg in self.groups['__latest__'].getSortedList(trim=0):
-                w.start('item')
-                w.element('guid', self.mkLinkUrl(pkg, isrss=1))
-                w.element('link', self.mkLinkUrl(pkg, isrss=1))
-                w.element('pubDate', pkg.getTime(isoformat))
-                w.element('title', 'Update: %s-%s-%s' % (pkg.n, pkg.v, pkg.r))
-                w.element('category', pkg.n)
-                w.element('category', pkg.group.name)
+                tb.start('item')
+                tb.start('guid')
+                tb.data(self.mkLinkUrl(pkg, isrss=1))
+                tb.end('guid')
+                tb.start('link')
+                tb.data(self.mkLinkUrl(pkg, isrss=1))
+                tb.end('link')
+                tb.start('pubDate')
+                tb.data(pkg.getTime(isoformat))
+                tb.end('pubDate')
+                tb.start('title')
+                tb.data('Update: %s-%s-%s' % (pkg.n, pkg.v, pkg.r))
+                tb.end('title')
+                tb.start('category')
+                tb.data(pkg.n)
+                tb.end('category')
+                tb.start('category')
+                tb.data(pkg.group.name)
+                tb.end('category')
                 kobj.package = pkg
                 description = kobj.serialize()
-                w.element('description', description)
-                w.end()
-            w.end()
-            w.close(rss)
+                tb.start('description')
+                tb.data(description)
+                tb.end('description')
+                tb.end('item')
+            tb.end('channel')
+            tb.end('rss')
+            et = ElementTree(rss)
+            et.write(out, 'utf-8')
             _say('done\n')
         
         _say('writing checksum...', 1)
         chkfile = os.path.join(self.outdir, 'checksum')
         fh = open(chkfile, 'w')
-        fh.write(self.repodata['primary']['checksum'][1])
+        if oldrepomd:
+            fh.write(self.repodata['primary']['checksum'][1])
+        else:
+            fh.write(self.repodata['primary'].checksum[1])
         fh.close()
         _say('done\n')
+
         _say('Moving new repoview dir in place...', 1)
-        if os.path.isdir(self.olddir):
-            shutil.rmtree(self.olddir)
-        os.rename(self.outdir, self.olddir)
+        # Delete everything except for self.outdir.
+        for root, dirs, files in os.walk(self.homedir):
+            if self.outdirname in dirs:
+                dirs.remove(self.outdirname)
+            for d in dirs:
+                shutil.rmtree(os.path.join(root,d))
+            for f in files:
+                os.remove(os.path.join(root,f))
+            break
+        # Move new files into home.
+        for root, dirs, files in os.walk(self.outdir):
+           for d in dirs:
+               shutil.move(os.path.join(root,d),os.path.join(self.homedir,d))
+           for f in files:
+               os.rename(os.path.join(root,f),os.path.join(self.homedir,f))
+           break
+        os.rmdir(self.outdir)
         _say('done\n')
 
 def main():
@@ -820,7 +859,7 @@ def main():
         'required template files: index.kid, group.kid, package.kid, rss.kid '
         'and the "layout" dir which will be copied into the repoview directory')
     parser.add_option('-t', '--title', dest='title', 
-        default='RepoView',
+        default='Repoview',
         help='Describe the repository in a few words. '
         'By default, "%default" is used. '
         'E.g.: -t "Extras for Fedora Core 4 x86"')
@@ -838,6 +877,11 @@ def main():
     parser.add_option('-q', '--quiet', dest='quiet', action='store_true',
         default=0,
         help='Do not output anything except fatal errors.')
+    parser.add_option('-s', '--srpm-url', dest='srpmurl',
+        default=None,
+        help='Repository base URL for Source RPM packages. E.g.: '
+        '-s "http://fedoraproject.org/extras/4/SRPMS". Leaving it off will '
+        'not link src.rpm packages from binary package page')
     (opts, args) = parser.parse_args()
     if not args:
         parser.error('Incorrect invocation.')
@@ -845,8 +889,11 @@ def main():
         opts.title = opts.dtitle
         print 'Option -l is deprecated. Please use -t or --title'
     quiet = opts.quiet
+    # TODO: Don't use globals
+    global srpmbaseurl
+    srpmbaseurl = opts.srpmurl
     repodir = args[0]
-    rv = RepoView(repodir, ignore=opts.ignore, xarch=opts.xarch, 
+    rv = Repoview(repodir, ignore=opts.ignore, xarch=opts.xarch, 
                   force=opts.force)
     rv.applyTemplates(opts.templatedir, title=opts.title, url=opts.url)
 

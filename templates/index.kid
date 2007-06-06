@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
-	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
   <title py:content="'RepoView: %s' % stats['title']"/>
-  <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css', isindex=1)}" type="text/css" />
+  <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css')}" type="text/css" />
   <link py:if="stats['dorss'] is not None"
-	  rel="alternate" type="application/rss+xml" title="RSS" href="${mkLinkUrl('rss-feed', isrss=1, isindex=1)}" />
+	  rel="alternate" type="application/rss+xml" title="RSS" href="${mkLinkUrl('rss-feed', isrss=1)}" />
 </head>
 <body>
     <div class="levbar">
@@ -14,7 +12,7 @@
     <ul class="levbarlist">
       <li py:for="grp in groups.getSortedList()">
         <a class="nlink"
-            href="${mkLinkUrl(grp, isindex=1)}"
+            href="${mkLinkUrl(grp)}"
             title="${grp.name}"
             py:content="len(grp.grid) > 20 and '%s...' % grp.grid[:17] or grp.grid"/>
       </li>
@@ -25,7 +23,7 @@
           <span class="letterlist">
             <a py:for="letter in letters.getSortedList()"
               class="nlink"
-              href="${mkLinkUrl(letter, isindex=1)}" py:content="letter.grid"/>
+              href="${mkLinkUrl(letter)}" py:content="letter.grid"/>
           </span>]
         </p>
         <h2 py:content="stats['title']"/>
@@ -49,15 +47,15 @@
         <ul class="pkglist">
           <li py:for="pkg in groups['__latest__'].getSortedList(trim=0)">
             <em><span py:content="pkg.getTime('%d-%b-%Y')"/></em>:
-            <a href="${mkLinkUrl(pkg, isindex=1)}" 
+            <a href="${mkLinkUrl(pkg)}" 
             	title="${pkg.summary}" class="inpage"
-                py:content="'%s-%s-%s' % (pkg.n, pkg.v, pkg.r)"/>
+                py:content="'%s-%s-%s.%s' % (pkg.n, pkg.v, pkg.r, pkg.arch)"/>
           </li>
         </ul>
         <h3>Available Groups</h3>
         <ul class="pkglist">
           <li py:for="grp in groups.getSortedList()">
-            <a href="${mkLinkUrl(grp, isindex=1)}" class="inpage"
+            <a href="${mkLinkUrl(grp)}" class="inpage"
                 py:content="grp.name"/>
           </li>
         </ul>

@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
-	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
   <title py:content="'RepoView: %s' % stats['title']"/>
@@ -34,7 +32,7 @@
         <ul class="pkglist">
           <li py:for="pkg in group.getSortedList(trim=0)">
             <a href="${mkLinkUrl(pkg)}" class="inpage"
-                py:content="'%s-%s-%s' % (pkg.n, pkg.v, pkg.r)"/>:
+                py:content="'%s' % (pkg.n)"/> - 
             <span py:content="pkg.summary"/>
           </li>
         </ul>

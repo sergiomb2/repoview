@@ -47,6 +47,14 @@ Repository URL to use when generating the RSS feed. E.g.:
 .br
 Not providing a url will disable RSS feed generation.
 .TP
+.B \-s, \-\-srpm\-url URL
+Repository base URL for Source RPM packages. E.g.:
+.br
+\-s "http://fedoraproject.org/extras/4/SRPMS"
+.br
+Not providing a url will not link src.rpm packages from 
+binary package page.
+.TP
 .B \-f, \-\-force
 Regenerate the pages even if the repomd checksum has not changed.
 .TP
@@ -88,6 +96,7 @@ This will generate an RSS feed:
 .SH "AUTHORS"
 .LP 
 Konstantin Ryabitsev <icon@fedoraproject.org>
+Michael Schwendt <bugs.michael@gmx.net>
 
 .SH "SEE ALSO"
 .LP 

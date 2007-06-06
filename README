@@ -22,6 +22,7 @@ NB: New-style comps.xml require yum libraries version 2.5 and above.
 AUTHORS:
 --------
 Konstantin Ryabitsev <icon@fedoraproject.org>
+Michael Schwendt <bugs.michael@gmx.net>
 
 URL:
 ----
@@ -30,7 +31,7 @@ http://www.linux.duke.edu/projects/mini/repoview/
 COPYRIGHT AND LICENSE:
 ----------------------
 This software is copyright (C) 2005 by Duke University
-This software is copyright (C) 2006 by McGill University
+This software is copyright (C) 2006-2007 by McGill University
 For licensing and copying information see COPYING.
 
 USAGE:

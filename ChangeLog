@@ -1,3 +1,36 @@
+Version 0.6:
+	* Accept a large patch from Michael Schwendt:
+		* run-time detection of Yum 2.9 API support (for repoMD)
+		* w3c compliance (pages created on FC6 pass w3c validator)
+		* output DOCTYPE via python-kid, output as xhtml-strict
+		* move "repoview" dir out of "repodata" dir, one level higher
+		* redirect from repodata/index.html to ../repoview/index.html
+		* rename package page files to %s.html, where %s is just the
+		  spec %{name} and not %name-%version-%release
+		* get rid of the version-release in the left navigation bar, too
+ 		* on package.kid pages, list all found package releases in a table,
+		  sorted by EVR, so one page per package %{name} only
+		* at the top of package.kid pages, list package description first
+		  and in <pre> because often it's preformatted
+		* don't show Vendor because it's an unimportant detail for Fedora
+		* add option -s to pass a relative path to the Source RPMs repo,
+		  which then is used to link to the Source package repoview pages
+		  from within a package page
+		* kill class Archer, since one package page lists multiple package
+		  versions for arbitrary architectures now and uses Package objects
+		* extend the Package class, so it knows some values about its
+		  Source Package and Source Package Repoview page
+		* replace 0 and 1 with True and False in some places, so it becomes
+		  more obvious that truth values are wanted
+		* make Group objects learn about one package in the group, so
+		  the left navigation bar can output clean tooltip details, such
+		  as the package %{summary}
+		* kill the "namemap" and _getNameMap function
+		* create the new tree of pages in "repoview/.new", which is inside 
+		  the repoview directory and not outside
+	* Use TreeBuilder instead of XMLWriter to simplify Python-2.5 
+	  compatibility
+
 Version 0.5.2:
 	* Webify more strings (Eric Lassauge)
 	* Use os.* functions for some shutil calls for older python (#551)

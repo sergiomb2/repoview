@@ -72,6 +72,10 @@ dt  {
     }
 th  {
     background-color: whitesmoke;
+    text-align: left;
+    }
+.field  {
+    background-color: whitesmoke;
     text-align: right;
     }
 .levbarlist {
