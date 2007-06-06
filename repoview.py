@@ -746,9 +746,9 @@ class Repoview:
 
         ## Do RSS feed
         if self.url is not None:
-            if sys.version_info[:2] == (2, 5):
+            try:
                 from xml.etree.cElementTree import ElementTree, TreeBuilder
-            else:
+            except ImportError:
                 from cElementTree import ElementTree, TreeBuilder
             _say('generating rss feed...', 1)
             isoformat = '%a, %d %b %Y %H:%M:%S %z'
