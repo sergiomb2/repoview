@@ -23,76 +23,45 @@ directory, to make it easily browseable.
 #
 # Copyright (C) 2005 by Duke University, http://www.duke.edu/
 # Copyright (C) 2006 by McGill University, http://www.mcgill.ca/
+# Copyright (C) 2007 by Konstantin Ryabitsev and contributors
 # Author: Konstantin Ryabitsev <icon@fedoraproject.org>
 #
-#pylint: disable-msg=F0401
+#pylint: disable-msg=F0401,C0103
 
 __revision__ = '$Id$'
 
-import fnmatch
 import os
 import re
 import shutil
 import sys
 import time
-import zlib
 
 from optparse import OptionParser
+from kid      import Template
+from lxml     import etree
 
-oldrepomd = False
-try:
-    from yum.repoMDObject import RepoMD
-except ImportError:
-    try:
-        from repomd.repoMDObject import RepoMD
-        oldrepomd = True
-    except ImportError:
-        print "No Yum RepoMD module found."
-        sys.exit(1)
-try:
-    from yum.comps import Comps, CompsException
-    from yum.mdparser import MDParser
-except ImportError:
-    try:
-        from noyum.comps import Comps, CompsException
-        from noyum.mdparser import MDParser
-        from noyum.repoMDObject import RepoMD
-    except ImportError:
-        print "No yum parsing routines found. Please see README."
-        sys.exit(1)
+from rpmUtils.miscutils import compareEVR
 
 try:
-    from rpmUtils.miscutils import compareEVR
+    import sqlite3 as sqlite
 except ImportError:
-    # No rpmUtils, fall back to simple string based sort
-    def compareEVR(x, y): 
-        return cmp("%s-%s-%s" % x, "%s-%s-%s" % y)
-
-from kid import Template
-##
-# Kid generates a FutureWarning on python 2.3
-#
-if sys.version_info[0] == 2 and sys.version_info[1] == 3:
-    import warnings
-    warnings.filterwarnings('ignore', category=FutureWarning)
-
-# pass this via options
-srpmbaseurl = None
+    import sqlite
 
 ##
 # Some hardcoded constants
 #
-pkgkid = 'package.kid'
-pkgfile = '%s.html'
-grkid = 'group.kid'
-grfile = '%s.group.html'
-idxkid = 'index.kid'
-idxfile = 'index.html'
+pkgkid    = 'package.kid'
+pkgfile   = '%s.html'
+grkid     = 'group.kid'
+grfile    = '%s.group.html'
+idxkid    = 'index.kid'
+idxfile   = 'index.html'
 redirfile = 'redirect.html'
-rsskid = 'rss.kid'
-rssfile = 'latest-feed.xml'
+rsskid    = 'rss.kid'
+rssfile   = 'latest-feed.xml'
 
 VERSION = '0.6'
+SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
 emailre = re.compile('<.*?@.*?>')
@@ -109,10 +78,8 @@ def _webify(text):
         remail = remail.replace('@', '{%}')
         try:
             text = re.sub(email, remail, text)
-        except Exception: #IGNORE:W0703
-            ##
-            # Sometimes this fails for very odd reasons. Shrug it off.
-            #
+        except Exception:
+            # Sometimes regex fails for unknown reasons.
             pass
     return text
 
@@ -141,8 +108,8 @@ class Package:
     the sense of an .rpm file, since it will include multiple architectures.
     """
     def __init__(self, pkgdata):
-        (n,e,v,r) = (pkgdata['name'],pkgdata['epoch'],pkgdata['ver'],
-                     pkgdata['rel'])
+        (n, e, v, r) = (pkgdata['name'], pkgdata['epoch'], pkgdata['ver'],
+                        pkgdata['rel'])
         self.evr = (e, v, r)
         self.n = n
         self.e = e
@@ -169,8 +136,8 @@ class Package:
         self.sourceurl = None
         self.sourcename = self._getSourceName()
         if srpmbaseurl and self.sourcename:
-            self.sourceurl = os.path.join(srpmbaseurl,'repoview/%s.html'%self.sourcename)
-
+            self.sourceurl = os.path.join(srpmbaseurl, 
+                'repoview/%s.html' % self.sourcename)
         self.pkgid = pkgdata['pkgId']  # checksum
         
         self.time = int(pkgdata['time_build'])
@@ -179,7 +146,7 @@ class Package:
         self.packager = _webify(pkgdata['packager'])
 
     def __str__(self):
-        return '%s-%s-%s.%s' % (self.n,self.v,self.r,self.arch)
+        return '%s-%s-%s.%s' % (self.n, self.v, self.r, self.arch)
     
     def __cmp__(self, other):
         """
@@ -237,6 +204,9 @@ class Package:
             return '%0.2f MiB' % (float(kbsize)/1024)
 
     def _getSourceName(self):
+        """
+        Guess the source name from the srpm name.
+        """
         if not self.sourcerpm:
             return None
         i = self.sourcerpm.rfind('-')
@@ -278,11 +248,10 @@ class Group:
     """
     def __init__(self, grid=None, name=None):
         self.packages = []
-        self.pkgnames = []
         self.grid = grid
         self.name = name
-        self.sorted = False
-        self.uservisible = 1
+        self.uservisible = True
+        self.description = ''
 
     def __str__(self):
         return self.name
@@ -293,8 +262,7 @@ class Group:
         The package object can be used to access details other than the
         package name.
         """
-        if package.n not in self.pkgnames:
-            self.pkgnames.append(package.n)
+        if package not in self.packages:
             self.packages.append(package)
 
     def getSortedList(self, trim=0, name=None):
@@ -327,29 +295,123 @@ class Repoview:
     """
     The base class.
     """
-    def __init__(self, repodir, ignore=None, xarch=None, force=0, maxlatest=30):
-        self.repodir = repodir
-        self.ignore = ignore is not None and ignore or []
-        self.xarch = xarch is not None and xarch or []
-        self.arches = []
-        self.force = force
-        self.url = None
-        self.homedir = os.path.join(self.repodir, 'repoview')
-        self.outdirname = '.new'
-        self.outdir = os.path.join(self.homedir, self.outdirname)
-        self.packages = {}
-        self.csums = {}
-        self.groups = GroupFactory()
-        self.letters = GroupFactory()
-        self.maxlatest = maxlatest
-        self.pkgcount = 0
-        self.pkgignored = 0
-        self.repodata = {}
-        repomd = os.path.join(self.repodir, 'repodata', 'repomd.xml')
+    def __init__(self, repodir, opts):
+        repomd = os.path.join(repodir, 'repodata', 'repomd.xml')
         if not os.access(repomd, os.R_OK):
             sys.stderr.write('Not found: %s\n' % repomd)
             sys.stderr.write('Does not look like a repository. Exiting.\n')
             sys.exit(1)
+        
+        self.repodir = repodir
+        self.opts    = opts
+        
+        self.groups = {}
+        
+        _say('Examining repository...', 1)
+        fh = open(repomd)
+        repoxml = fh.read()
+        fh.close()
+        
+        xml = etree.fromstring(repoxml) #IGNORE:E1101
+        # look for primary_db, other_db, and optionally group
+        
+        primary = other = comps = checksum = dbversion = None
+        
+        ns = 'http://linux.duke.edu/metadata/repo'
+        for datanode in xml.findall('{%s}data' % ns):
+            href = datanode.find('{%s}location' % ns).attrib['href']
+            if datanode.attrib['type'] == 'primary_db':
+                primary = os.path.join(repodir, href)
+                checksum = datanode.find('{%s}checksum' % ns).text
+                dbversion = datanode.find('{%s}database_version' % ns).text
+            elif datanode.attrib['type'] == 'other_db':
+                other = os.path.join(repodir, href)
+            elif datanode.attrib['type'] == 'group':
+                comps = os.path.join(repodir, href)
+        
+        if primary is None or dbversion is None:
+            _say('Sorry, sqlite files not found in the repository. Please '
+                 'rerun createrepo with a -d flag and try again.')
+            sys.exit(1)
+        
+        if int(dbversion) > SUPPORTED_DB_VERSION:
+            _say('Sorry, the db_version in the repository is %s, but repoview '
+                 'only supports versions up to %s. Please check for a newer '
+                 'repoview version.' % (dbversion, SUPPORTED_DB_VERSION))
+            sys.exit(1)
+        
+        _say('done\n')
+        # TODO: re-enable
+        #self._checkNecessity(checksum)
+        
+        _say('Opening primary database...', 1)
+        primary = self._bzHandler(primary)
+        pconn   = sqlite.connect(primary)
+        pcursor = pconn.cursor()
+        _say('done\n')
+        
+        _say('Opening changelogs database...', 1)
+        other   = self._bzHandler(other)
+        oconn   = sqlite.connect(other)
+        ocursor = oconn.cursor()
+        _say('done\n')
+        
+        # Formulate exclusion rule
+        self.exclude = ''
+        xarches = []
+        for xarch in opts.xarch:
+            xarch = xarch.replace("'", "''")
+            xarches.append("arch != '%s'" % xarch)
+        if xarches:
+            self.exclude += ' AND '.join(xarches)
+            
+        pkgs = []
+        for pkg in opts.ignore:
+            pkg = pkg.replace("'", "''")
+            pkg = pkg.replace("*", "%")
+            pkgs.append("name NOT LIKE '%s'" % pkg)
+        if pkgs:
+            if self.exclude:
+                self.exclude += ' AND '
+                self.exclude += ' AND '.join(pkgs)
+        
+        query = ('SELECT DISTINCT name FROM packages WHERE %s ORDER BY name' 
+                 % self.exclude)
+        _say('Querying packages...', 1)
+        pcursor.execute(query)
+        pkgnames = []
+        pct = 0
+        
+        while True:
+            row = pcursor.fetchone()
+            if not row:
+                break
+            pct += 1
+            _say('\rQuerying packages: %s packages...' % pct)
+            pkgnames.append(row[0])
+        _say('done\n')
+        
+        if comps is not None:
+            pkgmap = self._getComps(comps, pkgnames)
+        
+        # go through packages
+        for pkgname in pkgnames:
+            # guess the latest package using SQL comparison
+            """SELECT epoch || '.' || version || '.' || release AS evr 
+                 FROM packages 
+                WHERE name='yum' OR name='bash' ORDER BY evr ASC;"""
+            # HERE #
+        sys.exit(0)
+        
+        # Auxiliary
+        self.outdir     = os.path.join(self.repodir, opts.outdir)
+        self.arches     = []
+        self.packages   = {}
+        self.groups     = GroupFactory()
+        self.letters    = GroupFactory()
+        self.pkgcount   = 0
+        self.pkgignored = 0
+        
         _say('Reading repository data...', 1)
         self.repodata = RepoMD(None, repomd).repoData
         _say('done\n')
@@ -362,14 +424,39 @@ class Repoview:
         if self.repodata.has_key('group'):
             self._getGroups()
 
-    def _checkNecessity(self):
+    def _bzHandler(self, dbfile):
+        """
+        If the database file is compressed, uncompresses it and returns the
+        """
+        if dbfile[-4:] != '.bz2':
+            # Not compressed
+            return dbfile
+        
+        import tempfile
+        from bz2 import BZ2File
+        
+        (unzfd, unzname) = tempfile.mkstemp()
+        zfd = BZ2File(dbfile)
+        unzfd = open(unzname, 'w')
+        
+        while True:
+            data = zfd.read(8192)
+            if not data: break
+            unzfd.write(data)
+        zfd.close()
+        unzfd.close()
+        
+        return unzname
+    
+    def _checkNecessity(self, checksum):
         """
         This will look at the checksum for primary.xml and compare it to the
         one recorded during the last run in repoview/checksum. If they match,
         the program exits, unless overridden with -f.
         """
         if self.force: 
-            return 1
+            return True
+        
         ## Check and get the existing repoview checksum file
         try:
             chkfile = os.path.join(self.homedir, 'checksum')
@@ -379,7 +466,7 @@ class Repoview:
         except IOError: 
             return 1
         checksum = checksum.strip()
-        if oldrepomd:
+        if RepoMD.isOld:
             if checksum != self.repodata['primary']['checksum'][1]:
                 return 1
         elif checksum != self.repodata['primary'].checksum[1]: 
@@ -387,59 +474,50 @@ class Repoview:
         _say("Repoview: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
 
-    def _getGroups(self):
+    def _getComps(self, compsxml, goodnames):
         """
         Utility method for parsing comps.xml.
         """
         _say('parsing comps...', 1)
-        if oldrepomd:
-            loc = self.repodata['group']['relativepath']
-        else:
-            loc = self.repodata['group'].location[1]
+        
+        from yum.comps import Comps
+        
         comps = Comps()
-        try:
-            comps.add(os.path.join(self.repodir, loc))
-            groups = comps.groups
-            comps.isold = 0
-        except AttributeError:
-            # Must be dealing with yum < 2.5
-            try:
-                comps.load(os.path.join(self.repodir, loc))
-                groups = comps.groups.values()
-                comps.isold = 1
-            except CompsException:
-                print 'Error parsing %s!' % loc
-                print 'You may be trying to parse the new comps format'
-                print 'with old yum libraries. Falling back to RPM groups.'
-                return
+        comps.add(compsxml)
+        groups = comps.groups
         pct = 0
+        
+        # no better way to do this other than via a dict
+        pkgmap = {}
+        
         for entry in groups:
             pct += 1
-            group = Group()
-            if comps.isold:
-                group.grid = _mkid(entry.id)
-                packages = entry.packages.keys()
-            else:
+            grid = _mkid(entry.groupid)
+            if grid not in self.groups.keys():
+                group = Group()
                 group.grid = _mkid(entry.groupid)
-                packages = entry.packages
-            group.name = _webify(entry.name)
-            group.description = _webify(entry.description)
-            group.uservisible = entry.user_visible
-            for name in packages:
-                pkglist = self.packages.get(name,[])
-                for package in pkglist:
-                    group.add(package)
-                    package.group = group
+                group.name = _webify(entry.name)
+                group.description = _webify(entry.description)
+                group.uservisible = bool(entry.user_visible)
+                self.groups[grid] = group
+            else:
+                group = self.groups[grid]
+            for package in entry.packages:
+                if package not in goodnames or package in pkgmap.keys():
+                    continue
+                pkgmap[package] = group
+                group.add(package)
+                
             _say('\rparsing comps: %s groups' % pct)
-            self.groups[group.grid] = group
         _say('...done\n', 1)
-
+        return pkgmap
+    
     def _getPrimary(self):
         """
         Utility method for processing primary.xml.
         """
         _say('parsing primary...', 1)
-        if oldrepomd:
+        if RepoMD.isOld:
             loc = self.repodata['primary']['relativepath']
         else:
             loc = self.repodata['primary'].location[1]
@@ -470,14 +548,18 @@ class Repoview:
         if self._checkIgnore(name): 
             return False
         package = Package(pkgdata)
-        self.packages.setdefault(name,[])
+        self.packages.setdefault(name, [])
         self.packages[name].append(package)
         self.csums[package.pkgid] = package
         return True
 
     def _sortPackages(self):
-        def cmpevr(a,b):
-            return compareEVR(b.evr,a.evr)
+        """
+        Sort packages based on their evr.
+        """
+        def cmpevr(a, b):
+            "Utility function to pass to sort"
+            return compareEVR(b.evr, a.evr)
         for name in self.packages:
             self.packages[name].sort(cmpevr)
         
@@ -506,7 +588,7 @@ class Repoview:
         Utility method to get data from other.xml.
         """
         _say('parsing other...', 1)
-        if oldrepomd:
+        if RepoMD.isOld:
             loc = self.repodata['other']['relativepath']
         else:
             loc = self.repodata['other'].location[1]
@@ -524,7 +606,10 @@ class Repoview:
                 (mdp.count, ignored))
         _say('...done\n', 1)
 
-    def _setGroup(self,package):
+    def _setGroup(self, package):
+        """
+        Set the package group membership.
+        """
         grid = _mkid(package.rpmgroup)
         if grid not in self.groups.keys():
             group = Group(grid=grid, name=package.rpmgroup)
@@ -626,7 +711,7 @@ class Repoview:
                 link = os.path.join(prefix, rssfile)
                 ## A package in parent directory.
             elif obj.endswith('.rpm'):
-                link = os.path.join('..',obj)
+                link = os.path.join('..', obj)
             else:
                 ## A page linking to another page, usually .css
                 link = os.path.join(prefix, obj)
@@ -736,12 +821,12 @@ class Repoview:
         self.arches.sort()
         kobj = Template(file=idxtmpl, mkLinkUrl=self.mkLinkUrl,
             letters=self.letters, groups=self.groups, stats=stats)
-        out = os.path.join(self.outdir,idxfile)
+        out = os.path.join(self.outdir, idxfile)
         fh = open(out, 'w')
-        kobj.write(out,output='xhtml-strict')
+        kobj.write(out, output='xhtml-strict')
         fh.close()
         out = os.path.join(self.repodir, 'repodata', idxfile)
-        shutil.copy(os.path.join(templatedir,redirfile),out)
+        shutil.copy(os.path.join(templatedir, redirfile), out)
         _say('done\n')
 
         ## Do RSS feed
@@ -753,7 +838,7 @@ class Repoview:
             _say('generating rss feed...', 1)
             isoformat = '%a, %d %b %Y %H:%M:%S %z'
             tb = TreeBuilder()
-            out = os.path.join(self.outdir,rssfile)
+            out = os.path.join(self.outdir, rssfile)
             rss = tb.start('rss', {'version': '2.0'})
             tb.start('channel')
             tb.start('title')
@@ -810,7 +895,7 @@ class Repoview:
         _say('writing checksum...', 1)
         chkfile = os.path.join(self.outdir, 'checksum')
         fh = open(chkfile, 'w')
-        if oldrepomd:
+        if RepoMD.isOld:
             fh.write(self.repodata['primary']['checksum'][1])
         else:
             fh.write(self.repodata['primary'].checksum[1])
@@ -823,17 +908,19 @@ class Repoview:
             if self.outdirname in dirs:
                 dirs.remove(self.outdirname)
             for d in dirs:
-                shutil.rmtree(os.path.join(root,d))
+                shutil.rmtree(os.path.join(root, d))
             for f in files:
-                os.remove(os.path.join(root,f))
+                os.remove(os.path.join(root, f))
             break
         # Move new files into home.
         for root, dirs, files in os.walk(self.outdir):
-           for d in dirs:
-               shutil.move(os.path.join(root,d),os.path.join(self.homedir,d))
-           for f in files:
-               os.rename(os.path.join(root,f),os.path.join(self.homedir,f))
-           break
+            for d in dirs:
+                shutil.move(os.path.join(root, d), 
+                            os.path.join(self.homedir, d))
+            for f in files:
+                os.rename(os.path.join(root, f), 
+                          os.path.join(self.homedir, f))
+            break
         os.rmdir(self.outdir)
         _say('done\n')
 
@@ -844,7 +931,7 @@ def main():
     parser = OptionParser(usage=usage, version='%prog ' + VERSION)
     parser.add_option('-i', '--ignore-package', dest='ignore', action='append',
         default=[],
-        help='Optionally ignore this package -- can be a shell-style glob. '
+        help='Optionally ignore these packages -- can be a shell-style glob. '
         'This is useful for excluding debuginfo packages, e.g.: '
         '"-i *debuginfo* -i *doc*". '
         'The globbing will be done against name-epoch-version-release, '
@@ -858,24 +945,20 @@ def main():
         'the default: %default. The template directory must contain four '
         'required template files: index.kid, group.kid, package.kid, rss.kid '
         'and the "layout" dir which will be copied into the repoview directory')
+    parser.add_option('-o', '--output-dir', dest='outdir',
+        default='repoview',
+        help='Create the repoview pages in this subdirectory inside '
+        'the repository (default: "%default")')
     parser.add_option('-t', '--title', dest='title', 
         default='Repoview',
         help='Describe the repository in a few words. '
         'By default, "%default" is used. '
         'E.g.: -t "Extras for Fedora Core 4 x86"')
-    parser.add_option('-l', '--title-deprecated', dest='dtitle',
-        default=None,
-        help='This option is deprecated. Please use -t.')
     parser.add_option('-u', '--url', dest='url',
         default=None,
         help='Repository URL to use when generating the RSS feed. E.g.: '
         '-u "http://fedoraproject.org/extras/4/i386". Leaving it off will '
         'skip the rss feed generation')
-    parser.add_option('-s', '--srpm-url', dest='srpmurl',
-        default=None,
-        help='Repository base URL for Source RPM packages. E.g.: '
-        '-s "http://fedoraproject.org/extras/4/SRPMS". Leaving it off will '
-        'not link src.rpm packages from binary package page')
     parser.add_option('-f', '--force', dest='force', action='store_true',
         default=0,
         help='Regenerate the pages even if the repomd checksum has not changed')
@@ -885,17 +968,11 @@ def main():
     (opts, args) = parser.parse_args()
     if not args:
         parser.error('Incorrect invocation.')
-    if opts.dtitle is not None:
-        opts.title = opts.dtitle
-        print 'Option -l is deprecated. Please use -t or --title'
+            
     quiet = opts.quiet
-    # TODO: Don't use globals
-    global srpmbaseurl
-    srpmbaseurl = opts.srpmurl
     repodir = args[0]
-    rv = Repoview(repodir, ignore=opts.ignore, xarch=opts.xarch, 
-                  force=opts.force)
-    rv.applyTemplates(opts.templatedir, title=opts.title, url=opts.url)
+    rv = Repoview(repodir, opts)
+    rv.applyTemplates()
 
 if __name__ == '__main__':
     main()
