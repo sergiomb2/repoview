@@ -38,9 +38,13 @@ import time
 
 from optparse import OptionParser
 from kid      import Template
-from lxml     import etree
 
 from rpmUtils.miscutils import compareEVR
+
+try:
+    from xml.etree.cElementTree import fromstring, ElementTree, TreeBuilder
+except ImportError:
+    from cElementTree import fromstring, ElementTree, TreeBuilder
 
 try:
     import sqlite3 as sqlite
@@ -312,7 +316,7 @@ class Repoview:
         repoxml = fh.read()
         fh.close()
         
-        xml = etree.fromstring(repoxml) #IGNORE:E1101
+        xml = fromstring(repoxml) #IGNORE:E1101
         # look for primary_db, other_db, and optionally group
         
         primary = other = comps = checksum = dbversion = None
@@ -375,31 +379,73 @@ class Repoview:
                 self.exclude += ' AND '
                 self.exclude += ' AND '.join(pkgs)
         
-        query = ('SELECT DISTINCT name FROM packages WHERE %s ORDER BY name' 
-                 % self.exclude)
-        _say('Querying packages...', 1)
-        pcursor.execute(query)
-        pkgnames = []
-        pct = 0
-        
-        while True:
-            row = pcursor.fetchone()
-            if not row:
-                break
-            pct += 1
-            _say('\rQuerying packages: %s packages...' % pct)
-            pkgnames.append(row[0])
-        _say('done\n')
+        if not self.exclude:
+            # Silly hack to simplify SQL mangling
+            self.exclude = '1'
         
         if comps is not None:
-            pkgmap = self._getComps(comps, pkgnames)
+            groups = self._getComps(comps)
+        else:
+            groups = self._getGroups(pcursor)
         
-        # go through packages
-        for pkgname in pkgnames:
-            # guess the latest package using SQL comparison
-            """SELECT epoch || '.' || version || '.' || release AS evr 
-                 FROM packages 
-                WHERE name='yum' OR name='bash' ORDER BY evr ASC;"""
+        _say('Collecting letters...', 1)
+        
+        query = """SELECT DISTINCT substr(upper(name), 0, 1) AS letter 
+                     FROM packages 
+                    WHERE %s
+                 ORDER BY letter""" % self.exclude
+        pcursor.execute(query)
+        
+        letters = []
+        for (letter,) in pcursor.fetchall():
+            letters.append(letter)
+        
+        
+        ##
+        # for each package page, we need the following data:
+        # - repository title
+        # - group name
+        # - surrounding packages
+        # - letters
+        # - most recent package description and changelogs
+        # - list of all packages for this name:
+        #   n-e:v-r-a size built
+        
+        
+        for (name, description, packages) in groups:
+            print name, description, packages
+            sys.exit(0)
+            stats = {
+                'title': opts.title
+                     }
+            # fetch 
+            query = """SELECT epoch || '.' || version || '.' || release AS ord,
+                              arch,
+                              epoch,
+                              version,
+                              release,
+                              summary,
+                              description,
+                              url,
+                              time_build,
+                              rpm_license,
+                              size_package,
+                              location_href
+                         FROM packages 
+                        WHERE name='%s' AND %s 
+                     ORDER BY ord, arch ASC""" % (pkgname, self.exclude)
+            pcursor.execute(query)
+            
+            # this is our master package
+            row = pcursor.fetchone()
+            summary = row[5]
+            description = row[6]
+            url = row[7]
+            rpm_license = row[9]
+            rpm_group = pkgmap[pkgname]
+            
+            print pkgname, rpm_group
+            sys.exit(1)
             # HERE #
         sys.exit(0)
         
@@ -474,64 +520,50 @@ class Repoview:
         _say("Repoview: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
 
-    def _getComps(self, compsxml, goodnames):
+    def _getComps(self, compsxml):
         """
         Utility method for parsing comps.xml.
+        [name, description, [packages]]
         """
-        _say('parsing comps...', 1)
-        
         from yum.comps import Comps
         
+        _say('Parsing comps.xml:', 1)
+        groups = []        
         comps = Comps()
         comps.add(compsxml)
-        groups = comps.groups
+        
         pct = 0
-        
-        # no better way to do this other than via a dict
-        pkgmap = {}
-        
-        for entry in groups:
+        for group in comps.groups:
+            if not group.user_visible:
+                continue
             pct += 1
-            grid = _mkid(entry.groupid)
-            if grid not in self.groups.keys():
-                group = Group()
-                group.grid = _mkid(entry.groupid)
-                group.name = _webify(entry.name)
-                group.description = _webify(entry.description)
-                group.uservisible = bool(entry.user_visible)
-                self.groups[grid] = group
-            else:
-                group = self.groups[grid]
-            for package in entry.packages:
-                if package not in goodnames or package in pkgmap.keys():
-                    continue
-                pkgmap[package] = group
-                group.add(package)
-                
-            _say('\rparsing comps: %s groups' % pct)
+            groups.append([group.name, group.description, group.packages])                
+            _say('\rParsing comps.xml: %s groups' % pct)
         _say('...done\n', 1)
-        return pkgmap
+        return groups
     
-    def _getPrimary(self):
-        """
-        Utility method for processing primary.xml.
-        """
-        _say('parsing primary...', 1)
-        if RepoMD.isOld:
-            loc = self.repodata['primary']['relativepath']
-        else:
-            loc = self.repodata['primary'].location[1]
-        mdp = MDParser(os.path.join(self.repodir, loc))
-        ignored = 0
-        for package in mdp:
-            if not self._doPackage(package): 
-                ignored += 1
-            _say('\rparsing primary: %s packages, %s ignored' % (mdp.count,
-                ignored))
-        self.pkgcount = mdp.count - ignored
-        self.pkgignored = ignored
+    def _getGroups(self, cursor, goodnames):
+        _say('Collecting group information...', 1)
+        groups = []
+        query = 'SELECT DISTINCT rpm_group FROM packages ORDER BY rpm_group ASC'
+        cursor.execute(query)
+        
+        pct = 0
+        for (rpmgroup,) in cursor.fetchall():  
+            pct += 1    
+            query = """SELECT name 
+                         FROM packages 
+                        WHERE rpm_group='%s' 
+                     ORDER BY name""" % rpmgroup.replace("'", "''");
+            cursor.execute(query)
+            packages = []
+            for (package,) in cursor.fetchall():
+                packages.append(package)
+            groups.append([rpmgroup, None, packages])    
+            _say('\rCollecting group information: %s groups' % pct)
         _say('...done\n', 1)
-
+        return groups
+        
     def _doPackage(self, pkgdata):
         """
         Helper method for cleanliness. Accepts mdparser pkg and sees if we need
@@ -831,10 +863,6 @@ class Repoview:
 
         ## Do RSS feed
         if self.url is not None:
-            try:
-                from xml.etree.cElementTree import ElementTree, TreeBuilder
-            except ImportError:
-                from cElementTree import ElementTree, TreeBuilder
             _say('generating rss feed...', 1)
             isoformat = '%a, %d %b %Y %H:%M:%S %z'
             tb = TreeBuilder()
