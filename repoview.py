@@ -37,12 +37,16 @@ import time
 import zlib
 
 from optparse import OptionParser
-from elementtree.SimpleXMLWriter import XMLWriter
+
+try:
+    from xml.etree.cElementTree import ElementTree, TreeBuilder
+except ImportError:
+    from cElementTree import ElementTree, TreeBuilder
 
 try:
     from yum.comps import Comps, CompsException
     from yum.mdparser import MDParser
-    from repomd.repoMDObject import RepoMD
+    from yum.repoMDObject import RepoMD
 except ImportError:
     try:
         from noyum.comps import Comps, CompsException
@@ -364,7 +368,7 @@ class RepoView:
         except IOError: 
             return 1
         checksum = checksum.strip()
-        if checksum != self.repodata['primary']['checksum'][1]: 
+        if checksum != self.repodata['primary'].checksum[1]: 
             return 1
         _say("RepoView: Repository has not changed. Force the run with -f.\n")
         sys.exit(0)
@@ -374,7 +378,7 @@ class RepoView:
         Utility method for parsing comps.xml.
         """
         _say('parsing comps...', 1)
-        loc = self.repodata['group']['relativepath']
+        loc = self.repodata['group'].location[1]
         comps = Comps()
         try:
             comps.add(os.path.join(self.repodir, loc))
@@ -383,7 +387,7 @@ class RepoView:
         except AttributeError:
             # Must be dealing with yum < 2.5
             try:
-                comps.load(os.path.join(self.repodir, loc))
+                comps.load(os.path.join(self.repodir, loc)) #IGNORE:E1103
                 groups = comps.groups.values()
                 comps.isold = 1
             except CompsException:
@@ -436,7 +440,7 @@ class RepoView:
         Utility method for processing primary.xml.
         """
         _say('parsing primary...', 1)
-        loc = self.repodata['primary']['relativepath']
+        loc = self.repodata['primary'].location[1]
         mdp = MDParser(os.path.join(self.repodir, loc))
         ignored = 0
         for package in mdp:
@@ -507,7 +511,7 @@ class RepoView:
         Utility method to get data from other.xml.
         """
         _say('parsing other...', 1)
-        loc = self.repodata['other']['relativepath']
+        loc = self.repodata['other'].location[1]
         otherxml = os.path.join(self.repodir, loc)
         ignored = 0
         mdp = MDParser(otherxml)
@@ -758,38 +762,65 @@ class RepoView:
         if self.url is not None:
             _say('generating rss feed...', 1)
             isoformat = '%a, %d %b %Y %H:%M:%S %z'
+            tb = TreeBuilder()
             out = os.path.join(self.repodir, 'repodata', rssfile)
-            w = XMLWriter(out, 'utf-8')
-            rss = w.start('rss', version='2.0')
-            w.start('channel')
-            w.element('title', title)
-            w.element('link', '%s/repodata/%s' % (url, rssfile))
-            w.element('description', 'Latest packages for %s' % title)
-            w.element('lastBuildDate', time.strftime(isoformat))
-            w.element('generator', 'Repoview-%s' % VERSION)
+            rss = tb.start('rss', {'version': '2.0'})
+            tb.start('channel')
+            tb.start('title')
+            tb.data(title)
+            tb.end('title')
+            tb.start('link')
+            tb.data('%s/repoview/%s' % (url, rssfile))
+            tb.end('link')
+            tb.start('description')
+            tb.data('Latest packages for %s' % title)
+            tb.end('description')
+            tb.start('lastBuildDate')
+            tb.data(time.strftime(isoformat))
+            tb.end('lastBuildDate')
+            tb.start('generator')
+            tb.data('Repoview-%s' % VERSION)
+            tb.end('generator')
+            
             rsstmpl = os.path.join(templatedir, rsskid)
             kobj = Template(file=rsstmpl, stats=stats, 
                             mkLinkUrl=self.mkLinkUrl)
             for pkg in self.groups['__latest__'].getSortedList(trim=0):
-                w.start('item')
-                w.element('guid', self.mkLinkUrl(pkg, isrss=1))
-                w.element('link', self.mkLinkUrl(pkg, isrss=1))
-                w.element('pubDate', pkg.getTime(isoformat))
-                w.element('title', 'Update: %s-%s-%s' % (pkg.n, pkg.v, pkg.r))
-                w.element('category', pkg.n)
-                w.element('category', pkg.group.name)
+                tb.start('item')
+                tb.start('guid')
+                tb.data(self.mkLinkUrl(pkg, isrss=1))
+                tb.end('guid')
+                tb.start('link')
+                tb.data(self.mkLinkUrl(pkg, isrss=1))
+                tb.end('link')
+                tb.start('pubDate')
+                tb.data(pkg.getTime(isoformat))
+                tb.end('pubDate')
+                tb.start('title')
+                tb.data('Update: %s-%s-%s' % (pkg.n, pkg.v, pkg.r))
+                tb.end('title')
+                tb.start('category')
+                tb.data(pkg.n)
+                tb.end('category')
+                tb.start('category')
+                tb.data(pkg.group.name)
+                tb.end('category')
                 kobj.package = pkg
                 description = kobj.serialize()
-                w.element('description', description)
-                w.end()
-            w.end()
-            w.close(rss)
+                tb.start('description')
+                tb.data(description)
+                tb.end('description')
+                tb.end('item')
+            tb.end('channel')
+            tb.end('rss')
+            et = ElementTree(rss)
+            et.write(out, 'utf-8')
             _say('done\n')
         
         _say('writing checksum...', 1)
         chkfile = os.path.join(self.outdir, 'checksum')
         fh = open(chkfile, 'w')
-        fh.write(self.repodata['primary']['checksum'][1])
+        fh.write(self.repodata['primary'].checksum[1])
         fh.close()
         _say('done\n')
         _say('Moving new repoview dir in place...', 1)
@@ -800,7 +831,7 @@ class RepoView:
 
 def main():
     "Main program code"
-    global quiet #IGNORE:W0121
+    global quiet #IGNORE:W0603
     usage = 'usage: %prog [options] repodir'
     parser = OptionParser(usage=usage, version='%prog ' + VERSION)
     parser.add_option('-i', '--ignore-package', dest='ignore', action='append',
