@@ -35,6 +35,7 @@ import re
 import shutil
 import sys
 import time
+import md5
 
 from optparse import OptionParser
 from kid      import Template
@@ -103,7 +104,7 @@ def _mkid(text):
     Remove slashes.
     """
     text = text.replace('/', '.')
-    text = text.replace(' ', '')
+    text = text.replace(' ', '').lower()
     return text
 
 class Package:
@@ -345,8 +346,40 @@ class Repoview:
             sys.exit(1)
         
         _say('done\n')
-        # TODO: re-enable
-        #self._checkNecessity(checksum)
+                
+        self.state_data = {}
+        state   = os.path.join(repodir, 'repodata', '.repoview_state.sqlite')
+        sconn   = sqlite.connect(state)
+        scursor = sconn.cursor()
+        
+        try:
+            query = """CREATE TABLE state (
+                              filename TEXT UNIQUE,
+                              checksum TEXT)"""
+            scursor.execute(query)
+        except sqlite.OperationalError:
+            # for now, let's pretend this only happens when the table already
+            # exists
+            pass
+        
+        if opts.force:
+            query = 'DELETE FROM state'
+            scursor.execute(query)
+        
+        # read all state data into memory to track orphaned files
+        query = """SELECT filename, checksum FROM state"""
+        scursor.execute(query)
+        while True:
+            row = scursor.fetchone()
+            if row is None:
+                break
+            self.state_data[row[0]] = row[1]
+        
+        if not self._hasChanged(scursor, 'repomd.xml', checksum):
+            _say("Repoview: Repository has not changed. "
+                 "Force the run with -f.\n")
+            sconn.commit()
+            sys.exit(0)
         
         _say('Opening primary database...', 1)
         primary = self._bzHandler(primary)
@@ -359,7 +392,7 @@ class Repoview:
         oconn   = sqlite.connect(other)
         ocursor = oconn.cursor()
         _say('done\n')
-        
+                
         # Formulate exclusion rule
         self.exclude = ''
         xarches = []
@@ -396,57 +429,124 @@ class Repoview:
                  ORDER BY letter""" % self.exclude
         pcursor.execute(query)
         
-        letters = []
+        letters = ''
         for (letter,) in pcursor.fetchall():
-            letters.append(letter)
-        
+            letters += letter
+            query = """SELECT DISTINCT name 
+                         FROM packages
+                        WHERE name LIKE '%s%%'""" % letter
+            pcursor.execute(query)
+            packages = []
+            for (pkgname,) in pcursor.fetchall():
+                packages.append(pkgname)
+            groups.append(['Letter %s' % letter, 
+                           'Packages starting with letter "%s"' % letter,
+                           packages
+                           ])
+        _say('%d letters, done\n' % len(letters))
         
         ##
         # for each package page, we need the following data:
         # - repository title
         # - group name
+        # - group description
         # - surrounding packages
         # - letters
-        # - most recent package description and changelogs
+        # - "master" package summary, description, url, and license
         # - list of all packages for this name:
-        #   n-e:v-r-a size built
+        #   n-e:v-r-a size built last-changelog
         
+        seen_packages = []
         
-        for (name, description, packages) in groups:
-            print name, description, packages
-            sys.exit(0)
-            stats = {
-                'title': opts.title
-                     }
-            # fetch 
-            query = """SELECT epoch || '.' || version || '.' || release AS ord,
-                              arch,
-                              epoch,
-                              version,
-                              release,
-                              summary,
-                              description,
-                              url,
-                              time_build,
-                              rpm_license,
-                              size_package,
-                              location_href
-                         FROM packages 
-                        WHERE name='%s' AND %s 
-                     ORDER BY ord, arch ASC""" % (pkgname, self.exclude)
-            pcursor.execute(query)
+        for (group_name, group_description, pkgnames) in groups:
             
-            # this is our master package
-            row = pcursor.fetchone()
-            summary = row[5]
-            description = row[6]
-            url = row[7]
-            rpm_license = row[9]
-            rpm_group = pkgmap[pkgname]
+            pkgnames.sort()
             
-            print pkgname, rpm_group
-            sys.exit(1)
-            # HERE #
+            # See if we need to redo this group
+            filename = _mkid(grfile % group_name)
+            group_mangle = (opts.title + group_description + letters +
+                                ''.join(pkgnames))
+            checksum = md5.md5(group_mangle).hexdigest()
+            
+            if self._hasChanged(scursor, filename, checksum):
+                # write group file
+                _say('Writing group %s\n' % filename, 1)
+                
+            pkglist_before = []
+            pkglist_after = []
+            versions = []
+            
+            while pkgnames:
+                pkgname = pkgnames.pop(0)
+                filename = _mkid(pkgfile % pkgname)
+                
+                if filename in seen_packages:
+                    # already did this one, and first-come wins
+                    continue
+                
+                pkg_mangle = (opts.title + group_name + letters +
+                              ''.join(pkglist_before))
+                
+                aftercount = 19 - len(pkglist_before)
+                pkglist_after = pkgnames[:aftercount]
+                
+                pkg_mangle += ''.join(pkglist_after)
+                
+                
+                # fetch package info
+                query = """SELECT epoch || '.' || version || '.' || release AS ord,
+                                  pkgKey,
+                                  epoch,
+                                  version,
+                                  release,
+                                  arch,
+                                  summary,
+                                  description,
+                                  url,
+                                  time_build,
+                                  rpm_license,
+                                  size_package,
+                                  location_href
+                             FROM packages 
+                            WHERE name='%s' AND %s 
+                         ORDER BY ord, arch ASC""" % (pkgname, self.exclude)
+                pcursor.execute(query)
+                
+                # this is our master package
+                row = pcursor.fetchone()
+                if row is None:
+                    # sometimes comps does not reflect the reality
+                    continue
+                summary = row[6]
+                description = row[7]
+                url = row[8]
+                license = row[10]
+                
+                pkg_mangle += (summary + description + url + license)
+                
+                while True:
+                    # Get latest changelog entry
+                    query = '''SELECT author, date, changelog 
+                                 FROM changelog WHERE pkgKey=%d 
+                             ORDER BY date DESC LIMIT 1''' % row[1]
+                    ocursor.execute(query)
+                    crow = ocursor.fetchone()
+                    pkgdata = (row[2], row[3], row[4], row[5], row[9], row[11], 
+                               row[12], crow[0], crow[1], crow[2])
+                    versions.append(pkgdata)
+                    pkg_mangle += ''.join(map(str, pkgdata))
+                    
+                    checksum = md5.md5(pkg_mangle).hexdigest()
+                    
+                    if self._hasChanged(scursor, filename, checksum):
+                        _say('Writing package %s\n' % filename, 1)
+                    
+                    row = pcursor.fetchone()
+                    if row is None:
+                        break
+                
+        os.unlink(primary)
+        os.unlink(other)
         sys.exit(0)
         
         # Auxiliary
@@ -469,7 +569,28 @@ class Repoview:
         ## Do groups and resolve them
         if self.repodata.has_key('group'):
             self._getGroups()
-
+    
+    def _hasChanged(self, cursor, filename, checksum):
+        if filename not in self.state_data.keys():
+            # totally new entry
+            query = '''INSERT INTO state (filename, checksum)
+                                  VALUES ('%s', '%s')''' % (filename, checksum)
+            cursor.execute(query)
+            return True
+        if self.state_data[filename] != checksum:
+            # old entry, but changed
+            query = """UPDATE state 
+                          SET checksum='%s' 
+                        WHERE filename='%s'""" % (checksum, filename)
+            cursor.execute(query)
+            
+            # remove it from state_data tracking, so we know we've seen it
+            del self.state_data[filename]
+            return True
+        # old entry, unchanged
+        return False
+        
+    
     def _bzHandler(self, dbfile):
         """
         If the database file is compressed, uncompresses it and returns the
