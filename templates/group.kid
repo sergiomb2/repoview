@@ -1,45 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
-  <title py:content="'RepoView: %s' % stats['title']"/>
-  <link rel="stylesheet" href="${mkLinkUrl('layout/repostyle.css')}" type="text/css" />
+  <title py:content="'RepoView: %s' % repo_data['title']"/>
+  <link rel="stylesheet" href="layout/repostyle.css" type="text/css" />
 </head>
 <body>
     <div class="levbar">
-    <p class="pagetitle">
-        <a href="${mkLinkUrl('index.html')}" 
-        title="Back to the index page"
-        class="nlink" py:content="stats['title']"/>
-    </p>
+    <p class="pagetitle" py:content="group_data['name']"/>
     <ul class="levbarlist">
-      <li py:for="grp in groups.getSortedList()">
-        <a class="${grp.name == group.name and 'nactive' or 'nlink'}"
-            href="${mkLinkUrl(grp)}"
-            title="${grp.name}"
-            py:content="len(grp.grid) > 20 and '%s...' % grp.grid[:17] or grp.grid"/>
-      </li>
+	<li>
+        <a href="index.html" 
+        	title="Back to the index page"
+        	class="nlink">&laquo; Back to index</a>
+	</li>
     </ul>
     </div>
     <div class="main">
         <p class="nav">Jump to letter: [
           <span class="letterlist">
-            <a py:for="letter in letters.getSortedList()"
+            <a py:for="letter in repo_data['letters']"
               class="nlink"
-              href="${mkLinkUrl(letter)}" py:content="letter.grid"/>
+              href="${'letter_%s.group.html' % letter.lower()}" py:content="letter"/>
           </span>]
         </p>
-        <h2 py:content="group.name"/>
+        <h2 py:content="group_data['name']"/>
+	<p py:content="group_data['description']"/>
         <ul class="pkglist">
-          <li py:for="pkg in group.getSortedList(trim=0)">
-            <a href="${mkLinkUrl(pkg)}" class="inpage"
-                py:content="'%s' % (pkg.n)"/> - 
-            <span py:content="pkg.summary"/>
+          <li py:for="(name, filename, summary) in group_data['packages']">
+            <a href="${filename}" class="inpage" py:content="name"/> - 
+            <span py:content="summary"/>
           </li>
         </ul>
         <p class="footernote">
           Listing created by
           <a href="http://linux.duke.edu/projects/mini/repoview/"
-            class="repoview" py:content="'RepoView-%s' % stats['VERSION']"/>
+            class="repoview" py:content="'Repoview-%s' % repo_data['my_version']"/>
         </p>
     </div>
 </body>

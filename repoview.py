@@ -36,6 +36,7 @@ import shutil
 import sys
 import time
 import md5
+import marshal
 
 from optparse import OptionParser
 from kid      import Template
@@ -104,8 +105,20 @@ def _mkid(text):
     Remove slashes.
     """
     text = text.replace('/', '.')
-    text = text.replace(' ', '').lower()
+    text = text.replace(' ', '_').lower()
     return text
+
+def _humanSize(bytes):
+    """
+    This will return the size in sane units (KiB or MiB).
+    """
+    if bytes < 1024:
+        return '%d Bytes' % bytes
+    kbytes = bytes/1024
+    if kbytes/1024 < 1:
+        return '%d KiB' % kbytes
+    else:
+        return '%0.2f MiB' % (float(kbytes)/1024)
 
 class Package:
     """
@@ -434,7 +447,8 @@ class Repoview:
             letters += letter
             query = """SELECT DISTINCT name 
                          FROM packages
-                        WHERE name LIKE '%s%%'""" % letter
+                        WHERE name LIKE '%s%%' 
+                          AND %s""" % (letter, self.exclude)
             pcursor.execute(query)
             packages = []
             for (pkgname,) in pcursor.fetchall():
@@ -445,57 +459,59 @@ class Repoview:
                            ])
         _say('%d letters, done\n' % len(letters))
         
-        ##
-        # for each package page, we need the following data:
-        # - repository title
-        # - group name
-        # - group description
-        # - surrounding packages
-        # - letters
-        # - "master" package summary, description, url, and license
-        # - list of all packages for this name:
-        #   n-e:v-r-a size built last-changelog
+        group_tpt = os.path.join(opts.templatedir, grkid)
+        group_kid = Template(file=group_tpt)
         
-        seen_packages = []
+        pkg_tpt = os.path.join(opts.templatedir, pkgkid)
+        pkg_kid = Template(file=pkg_tpt)
+        
+        # we use this to track which packages and groups we already wrote.
+        # first-come first-serve.
+        written = []
+        
+        # create repoview directory if not yet created
+        outdir = os.path.join(repodir, 'repoview')
+        if not os.access(outdir, os.R_OK):
+            os.mkdir(outdir, 0755)
+        layoutsrc = os.path.join(opts.templatedir, 'layout')
+        layoutdst = os.path.join(outdir, 'layout')
+        if os.path.isdir(layoutsrc) and not os.access(layoutdst, os.R_OK):
+            _say('copying layout...', 1)
+            shutil.copytree(layoutsrc, layoutdst)
+            _say('done\n', 1)
         
         for (group_name, group_description, pkgnames) in groups:
             
             pkgnames.sort()
             
             # See if we need to redo this group
-            filename = _mkid(grfile % group_name)
-            group_mangle = (opts.title + group_description + letters +
-                                ''.join(pkgnames))
-            checksum = md5.md5(group_mangle).hexdigest()
+            group_filename = _mkid(grfile % group_name)
             
-            if self._hasChanged(scursor, filename, checksum):
-                # write group file
-                _say('Writing group %s\n' % filename, 1)
-                
-            pkglist_before = []
-            pkglist_after = []
-            versions = []
+            if group_filename in written:
+                continue
+            
+            repo_data = {
+                         'title': opts.title,
+                         'letters': letters,
+                         'my_version': VERSION
+                         }
+            
+            group_data = {
+                          'name':        group_name,
+                          'description': group_description,
+                          'filename':    group_filename,
+                          'packages':    []
+                          }
             
             while pkgnames:
                 pkgname = pkgnames.pop(0)
-                filename = _mkid(pkgfile % pkgname)
+                pkg_filename = _mkid(pkgfile % pkgname)
                 
-                if filename in seen_packages:
-                    # already did this one, and first-come wins
+                if pkg_filename in written:
                     continue
-                
-                pkg_mangle = (opts.title + group_name + letters +
-                              ''.join(pkglist_before))
-                
-                aftercount = 19 - len(pkglist_before)
-                pkglist_after = pkgnames[:aftercount]
-                
-                pkg_mangle += ''.join(pkglist_after)
-                
-                
-                # fetch package info
-                query = """SELECT epoch || '.' || version || '.' || release AS ord,
-                                  pkgKey,
+                                
+                # fetch versions
+                query = """SELECT pkgKey,
                                   epoch,
                                   version,
                                   release,
@@ -509,41 +525,90 @@ class Repoview:
                                   location_href
                              FROM packages 
                             WHERE name='%s' AND %s 
-                         ORDER BY ord, arch ASC""" % (pkgname, self.exclude)
+                         ORDER BY arch ASC""" % (pkgname, self.exclude)
                 pcursor.execute(query)
-                
-                # this is our master package
-                row = pcursor.fetchone()
-                if row is None:
-                    # sometimes comps does not reflect the reality
+
+                                
+                rows = pcursor.fetchall()
+                if not rows:
+                    # sometimes comps does not reflect reality
                     continue
-                summary = row[6]
-                description = row[7]
-                url = row[8]
-                license = row[10]
+                if len(rows) == 1:
+                    # only one package matching this name
+                    versions = [rows[0]]
+                else:
+                    # we will use the latest package as the "master" to 
+                    # obtain things like summary, description, etc.
+                    # go through all available packages and create a dict
+                    # keyed by (e,v,r)
+                    temp = {}
+                    for row in rows:
+                        temp[(row[1], row[2], row[3])] = row
+                    keys = temp.keys()
+                    keys.sort(compareEVR)
+                    keys.reverse()
+                    versions = []
+                    for key in keys:
+                        versions.append(temp[key])
                 
-                pkg_mangle += (summary + description + url + license)
+                pkg_data = {
+                            'name':        pkgname,
+                            'filename':    pkg_filename,
+                            'summary':     None,
+                            'description': None,
+                            'url':         None,
+                            'rpm_license': None,
+                            'rpms':        []
+                            }
                 
-                while True:
-                    # Get latest changelog entry
+                for row in versions:
+                    (pkgKey, epoch, version, release, arch, summary,
+                     description, url, time_build, rpm_license, size_package,
+                     location_href) = row
+                    if pkg_data['summary'] is None:
+                        pkg_data['summary'] = summary
+                        pkg_data['description'] = description
+                        pkg_data['url'] = url
+                        pkg_data['rpm_license'] = rpm_license
+                    
+                    built = time.strftime('%c', time.localtime(int(time_build)))
+                    size = _humanSize(size_package)
+                    
+                    # Get latest changelog entry for each version
                     query = '''SELECT author, date, changelog 
                                  FROM changelog WHERE pkgKey=%d 
-                             ORDER BY date DESC LIMIT 1''' % row[1]
+                             ORDER BY date DESC LIMIT 1''' % pkgKey
                     ocursor.execute(query)
-                    crow = ocursor.fetchone()
-                    pkgdata = (row[2], row[3], row[4], row[5], row[9], row[11], 
-                               row[12], crow[0], crow[1], crow[2])
-                    versions.append(pkgdata)
-                    pkg_mangle += ''.join(map(str, pkgdata))
+                    (author, time_added, changelog) = ocursor.fetchone()
+                    added = time.strftime('%c', time.localtime(int(time_added)))
                     
-                    checksum = md5.md5(pkg_mangle).hexdigest()
+                    pkg_data['rpms'].append((epoch, version, release, arch,
+                                             built, size, location_href, author,
+                                             changelog, added))
+                                
+                group_data['packages'].append((pkgname, pkg_filename, 
+                                               pkg_data['summary']))
                     
-                    if self._hasChanged(scursor, filename, checksum):
-                        _say('Writing package %s\n' % filename, 1)
-                    
-                    row = pcursor.fetchone()
-                    if row is None:
-                        break
+                
+                checksum = self._mkChecksum(repo_data, group_data, pkg_data)
+                if self._hasChanged(scursor, pkg_filename, checksum):
+                    _say('Writing package %s\n' % pkg_filename, 1)
+                    pkg_kid.repo_data = repo_data
+                    pkg_kid.group_data = group_data
+                    pkg_kid.pkg_data = pkg_data
+                    outfile = os.path.join(outdir, pkg_filename)
+                    pkg_kid.write(outfile, output='xhtml-strict')
+                    written.append(pkg_filename)
+            
+            checksum = self._mkChecksum(repo_data, group_data)
+            if self._hasChanged(scursor, group_filename, checksum):
+                # write group file
+                _say('Writing group %s\n' % group_filename, 1)
+                group_kid.repo_data = repo_data
+                group_kid.group_data = group_data
+                outfile = os.path.join(outdir, group_filename)
+                group_kid.write(outfile, output='xhtml-strict')
+                written.append(group_filename)
                 
         os.unlink(primary)
         os.unlink(other)
@@ -569,13 +634,32 @@ class Repoview:
         ## Do groups and resolve them
         if self.repodata.has_key('group'):
             self._getGroups()
+            
+    def _mkChecksum(self, *args):
+        mangle = []
+        for data in args:
+            # since dicts are non-deterministic, we get keys, then sort them,
+            # and then create a list of values, which we then marshal.
+            keys = data.keys()
+            keys.sort()
+            
+            for key in keys:
+                mangle.append(data[key])
+        
+        return md5.md5(marshal.dumps(mangle)).hexdigest()
     
     def _hasChanged(self, cursor, filename, checksum):
+        # calculate checksum
+    
         if filename not in self.state_data.keys():
             # totally new entry
             query = '''INSERT INTO state (filename, checksum)
                                   VALUES ('%s', '%s')''' % (filename, checksum)
-            cursor.execute(query)
+            try:
+                cursor.execute(query)
+            except:
+                print filename
+                sys.exit(1)
             return True
         if self.state_data[filename] != checksum:
             # old entry, but changed
