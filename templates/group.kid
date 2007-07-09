@@ -3,6 +3,7 @@
 <head>
   <title py:content="'RepoView: %s' % repo_data['title']"/>
   <link rel="stylesheet" href="layout/repostyle.css" type="text/css" />
+  <meta name="robots" content="noindex,follow" />
 </head>
 <body>
     <div class="levbar">

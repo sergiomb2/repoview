@@ -3,6 +3,7 @@
 <head>
   <title py:content="'RepoView: %s' % repo_data['title']"/>
   <link rel="stylesheet" href="layout/repostyle.css" type="text/css"/>
+  <meta name="robots" content="noindex,follow" />
 </head>
 <body>
     <div class="levbar">
@@ -10,9 +11,9 @@
       <ul class="levbarlist">
         <li>
         <a href="${group_data['filename']}" 
-        	title="Back to package listing"
-        	class="nlink">&laquo; Back to all packages</a>
-	</li>
+            title="Back to package listing"
+            class="nlink">&laquo; Back to group</a>
+    </li>
     </ul>
 
     </div>
@@ -25,45 +26,40 @@
           </span>]
         </p>
         <h2 py:content="'%s - %s' % (pkg_data['name'], pkg_data['summary'])"/>
-        <table cellpadding="3" cellspacing="0" width="100%">
-        <tr>
-            <th class="field">URL:</th><td><a href="${pkg_data['url']}" 
-		py:content="pkg_data['url']"/></td>
-	</tr>
-	<tr>
-	    <th class="field">License:</th><td py:content="pkg_data['rpm_license']"/>
-        </tr>
+        
+        <table border="0" cellspacing="0" cellpadding="2">
+          <tr py:if="pkg_data['url']">
+            <th>Website:</th>
+            <td><a href="${pkg_data['url']}" py:content="pkg_data['url']"/></td>
+          </tr>
+          <tr py:if="pkg_data['rpm_license']">
+            <th>License:</th>
+            <td py:content="pkg_data['rpm_license']"/>
+          </tr>
+          <tr py:if="pkg_data['vendor']">
+            <th>Vendor:</th>
+            <td py:content="pkg_data['vendor']"/>
+          </tr>
         </table>
+
         <dl>
         <dt>Description:</dt>
         <dd><pre py:content="pkg_data['description']"/></dd>
         </dl>
 
         <h3>Packages</h3>
-        <table cellpadding="3" cellspacing="3" width="100%">
-            <tr>
-                <th>Type</th>
-                <th>Epoch:Version-Release</th>
-		<th>Built</th>
-                <th>Size</th>
-		<th>Link</th>
-            </tr>
-            <tr py:for="(e, v, r, a, built, size, loc, log, author, added) in pkg_data['rpms']">
-                
-                <td py:content="'%s.%s' % (pkg_data['name'], a)"/>
-                <td py:content="'%s:%s-%s' % (e, v, r)"/>
-		<td py:content="built"/>
-		<td py:content="size"/>
-		<td>
-                  <a href="${'../%s' % loc}" class="inpage">download</a>
-                </td>
-            </tr>
+        <table border="0" cellpadding="0" cellspacing="10">
+        <tr py:for="(e, v, r, a, built, size, loc, author, log, added) in pkg_data['rpms']">
+            <td valign="top"><a href="${'../%s' % loc}" class="inpage" 
+              py:content="'%s-%s-%s.%s' % (pkg_data['name'], v, r, a)"/>
+              [<span style="white-space: nowrap" py:content="size"/>]</td>
+            <td valign="top">
+              <strong>Changelog</strong>
+              by <span py:content="'%s (%s)' % (author, added)"/>:
+              <pre style="margin: 0pt 0pt 5pt 5pt" py:content="log"/>
+            </td>
+        </tr>
         </table>
-        <!--h3>Changelog</h3>
-        <dl py:for="log in pkglist[0].getChangeLogs()">
-            <dt py:content="'* ' + log[0] + ' ' + log[1]"/>
-            <dd><pre py:content="log[2]"/></dd>
-        </dl-->
         <p class="footernote">
           Listing created by
           <a href="http://linux.duke.edu/projects/mini/repoview/"
