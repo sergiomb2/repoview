@@ -26,12 +26,11 @@ directory, to make it easily browseable.
 # Copyright (C) 2007 by Konstantin Ryabitsev and contributors
 # Author: Konstantin Ryabitsev <icon@fedoraproject.org>
 #
-#pylint: disable-msg=F0401,C0103
+#pylint: disable-msg=F0401,W0704
 
 __revision__ = '$Id$'
 
 import os
-import re
 import shutil
 import sys
 import time
@@ -55,30 +54,19 @@ except ImportError:
 ##
 # Some hardcoded constants
 #
-pkgkid    = 'package.kid'
-pkgfile   = '%s.html'
-grkid     = 'group.kid'
-grfile    = '%s.group.html'
-idxkid    = 'index.kid'
-idxfile   = 'index.html'
-redirfile = 'redirect.html'
-rsskid    = 'rss.kid'
-rssfile   = 'latest-feed.xml'
+PKGKID    = 'package.kid'
+PKGFILE   = '%s.html'
+GRPKID    = 'group.kid'
+GRPFILE   = '%s.group.html'
+IDXKID    = 'index.kid'
+IDXFILE   = 'index.html'
+RSSKID    = 'rss.kid'
+RSSFILE   = 'latest-feed.xml'
+ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
 VERSION = '0.6'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
-
-quiet = 0
-def _say(text, flush=0):
-    """
-    Unless in quiet mode, output the text passed.
-    """
-    if quiet:
-        return
-    sys.stdout.write(text)
-    if flush: 
-        sys.stdout.flush()
 
 def _mkid(text):
     """
@@ -88,7 +76,7 @@ def _mkid(text):
     text = text.replace(' ', '_').lower()
     return text
 
-def _humanSize(bytes):
+def _humansize(bytes):
     """
     This will return the size in sane units (KiB or MiB).
     """
@@ -99,8 +87,12 @@ def _humanSize(bytes):
     if kbytes/1024 < 1:
         return '%d KiB' % kbytes
     else:
-        return '%0.2f MiB' % (float(kbytes)/1024)
-     
+        return '%0.1f MiB' % (float(kbytes)/1024)
+
+def _compareEVRA(one, two):
+    return compareEVR(one[:3], two[:3])
+    
+
 class Repoview:
     """
     The base class.
@@ -111,74 +103,104 @@ class Repoview:
             if os.access(entry, os.W_OK):
                 os.unlink(entry)
     
-    def __init__(self, repodir, opts):
+    def __init__(self, opts):
         # list of files to remove at the end of processing
         self.cleanup = []
-        
-        repomd = os.path.join(repodir, 'repodata', 'repomd.xml')
-        if not os.access(repomd, os.R_OK):
-            sys.stderr.write('Not found: %s\n' % repomd)
-            sys.stderr.write('Does not look like a repository. Exiting.\n')
-            sys.exit(1)
-        
-        self.repodir = repodir
         self.opts    = opts
-        self.outdir  = os.path.join(repodir, 'repoview')
+        self.outdir  = os.path.join(opts.repodir, 'repoview')
         
-        self.exclude    = '1'
-        self.letters    = ''
-        self.state_data = {}
-        self.written    = {}
+        self.exclude    = '1=1'
+        self.state_data = {} #?
+        self.written    = {} #?
+        
+        self.groups        = []
+        self.letter_groups = []
         
         self.pcursor = None # primary.sqlite
         self.ocursor = None # other.sqlite
         self.scursor = None # state db
         
-        _say('Examining repository...', 1)
-        fh = open(repomd)
-        repoxml = fh.read()
-        fh.close()
-        
-        xml = fromstring(repoxml) #IGNORE:E1101
-        # look for primary_db, other_db, and optionally group
-        
-        primary = other = comps = checksum = dbversion = None
-        
-        ns = 'http://linux.duke.edu/metadata/repo'
-        for datanode in xml.findall('{%s}data' % ns):
-            href = datanode.find('{%s}location' % ns).attrib['href']
-            if datanode.attrib['type'] == 'primary_db':
-                primary = os.path.join(repodir, href)
-                checksum = datanode.find('{%s}checksum' % ns).text
-                dbversion = datanode.find('{%s}database_version' % ns).text
-            elif datanode.attrib['type'] == 'other_db':
-                other = os.path.join(repodir, href)
-            elif datanode.attrib['type'] == 'group':
-                comps = os.path.join(repodir, href)
-        
-        if primary is None or dbversion is None:
-            _say('Sorry, sqlite files not found in the repository. Please '
-                 'rerun createrepo with a -d flag and try again.')
-            sys.exit(1)
-        
-        if int(dbversion) > SUPPORTED_DB_VERSION:
-            _say('Sorry, the db_version in the repository is %s, but repoview '
-                 'only supports versions up to %s. Please check for a newer '
-                 'repoview version.' % (dbversion, SUPPORTED_DB_VERSION))
-            sys.exit(1)
-        
-        _say('done\n')
-                
+        self._setupRepo()
         self._setupOutdir()
+        self._setupStateDb()
+        self._setupExcludes()
         
-        # state db can be anywhere, so we'll use the md5sum of the repo
-        # location to make them unique
-        _say('Examining state db...')
-        if opts.statedir:
-            unique = '%s.state.sqlite' % md5.md5(self.repodir).hexdigest()
-            statedb = os.path.join(opts.statedir, unique)
+        self._setupRpmGroups()
+        
+        letters = self._setupLetterGroups()
+        
+        repo_data = {
+                     'title':      opts.title,
+                     'letters':    letters,
+                     'my_version': VERSION
+                    }
+        
+        group_kid = Template(file=os.path.join(opts.templatedir, GRPKID))
+        group_kid.repo_data = repo_data
+        self.group_kid = group_kid
+        
+        pkg_kid = Template(file=os.path.join(opts.templatedir, PKGKID))
+        pkg_kid.repo_data = repo_data
+        self.pkg_kid = pkg_kid
+        
+        for group_data in self.groups + self.letter_groups:
+            (grp_name, grp_filename, grp_description, pkgnames) = group_data
+            pkgnames.sort()
+            
+            group_data = {
+                          'name':        grp_name,
+                          'description': grp_description,
+                          'filename':    grp_filename,
+                          }
+            
+            packages = self._doPackages(repo_data, group_data, pkgnames)
+            group_data['packages'] = packages
+            
+            checksum = self._mkChecksum(repo_data, group_data)
+            if self._hasChanged(grp_filename, checksum):
+                # write group file
+                self._say('Writing group %s\n' % grp_filename)
+                self.group_kid.group_data = group_data
+                outfile = os.path.join(self.outdir, grp_filename)
+                self.group_kid.write(outfile, output='xhtml-strict')
+        
+        latest = self._getLatestPackages()
+        repo_data['latest'] = latest
+        
+        checksum = self._mkChecksum(repo_data)
+        if self._hasChanged('index.html', checksum):
+            # Write index.html and rss feed (if asked)
+            self._say('Writing index.html...')
+            idx_tpt = os.path.join(self.opts.templatedir, IDXKID)
+            idx_kid = Template(file=idx_tpt)
+            idx_kid.repo_data = repo_data
+            idx_kid.url = self.opts.url
+            idx_kid.latest = latest
+            idx_kid.groups = self.groups
+            outfile = os.path.join(self.outdir, 'index.html')
+            idx_kid.write(outfile, output='xhtml-strict')
+            self._say('done\n')
+            
+            # rss feed
+            if self.opts.url:
+                self._doRss(repo_data, latest)
+        
+        self._removeStale()
+        self.scursor.connection.commit()
+
+    def _setupStateDb(self):
+        self._say('Examining state db...')
+        if self.opts.statedir:
+            # we'll use the md5sum of the repo location to make it unique
+            unique = '%s.state.sqlite' % md5.md5(self.outdir).hexdigest()
+            statedb = os.path.join(self.opts.statedir, unique)
         else:
             statedb = os.path.join(self.outdir, 'state.sqlite')
+            
+        if self.opts.force and os.access(statedb, os.W_OK):
+            # clean slate -- remove state db and start over
+            os.unlink(statedb)
+        
         sconn = sqlite.connect(statedb)
         self.scursor = sconn.cursor()
         
@@ -191,10 +213,6 @@ class Repoview:
             # naively pretend this only happens when the table already exists
             pass
         
-        if opts.force:
-            query = 'DELETE FROM state'
-            self.scursor.execute(query)
-        
         # read all state data into memory to track orphaned files
         query = """SELECT filename, checksum FROM state"""
         self.scursor.execute(query)
@@ -203,72 +221,71 @@ class Repoview:
             if row is None:
                 break
             self.state_data[row[0]] = row[1]        
-        _say('done\n')
+        self._say('done\n')
         
-        _say('Opening primary database...', 1)
+    def _setupRepo(self):
+        self._say('Examining repository...')
+        repomd = os.path.join(self.opts.repodir, 'repodata', 'repomd.xml')
+        
+        if not os.access(repomd, os.R_OK):
+            sys.stderr.write('Not found: %s\n' % repomd)
+            sys.stderr.write('Does not look like a repository. Exiting.\n')
+            sys.exit(1)
+        
+        repoxml = open(repomd).read()
+        
+        xml = fromstring(repoxml) #IGNORE:E1101
+        # look for primary_db, other_db, and optionally group
+        
+        primary = other = comps = dbversion = None
+        
+        xmlns = 'http://linux.duke.edu/metadata/repo'
+        for datanode in xml.findall('{%s}data' % xmlns):
+            href = datanode.find('{%s}location' % xmlns).attrib['href']
+            if datanode.attrib['type'] == 'primary_db':
+                primary = os.path.join(self.opts.repodir, href)
+                dbversion = datanode.find('{%s}database_version' % xmlns).text
+            elif datanode.attrib['type'] == 'other_db':
+                other = os.path.join(self.opts.repodir, href)
+            elif datanode.attrib['type'] == 'group':
+                comps = os.path.join(self.opts.repodir, href)
+        
+        if primary is None or dbversion is None:
+            self._say('Sorry, sqlite files not found in the repository. Please '
+                      'rerun createrepo with a -d flag and try again.')
+            sys.exit(1)
+        
+        if int(dbversion) > SUPPORTED_DB_VERSION:
+            self._say('Sorry, the db_version in the repository is %s, but '
+                      'repoview only supports versions up to %s. Please check '
+                      'for a newer repoview version.' % (dbversion, 
+                                                         SUPPORTED_DB_VERSION))
+            sys.exit(1)
+        
+        self._say('done\n')
+        
+        self._say('Opening primary database...')
         primary = self._bzHandler(primary)
         pconn = sqlite.connect(primary)
         self.pcursor = pconn.cursor()
-        _say('done\n')
+        self._say('done\n')
         
-        _say('Opening changelogs database...', 1)
+        self._say('Opening changelogs database...')
         other = self._bzHandler(other)
         oconn = sqlite.connect(other)
         self.ocursor = oconn.cursor()
-        _say('done\n')
+        self._say('done\n')
         
-        self._setupExcludes()
+        if comps:
+            self._setupCompsGroups(comps)
+
+    def _say(self, text):
+        """
+        Unless in quiet mode, output the text passed.
+        """
+        if not self.opts.quiet:
+            sys.stdout.write(text)
         
-        if comps is not None:
-            groups = self._getComps(comps)
-        else:
-            groups = self._getGroups()
-        
-        groups += self._getLetterGroups()
-        
-        repo_data = {
-                     'title':      opts.title,
-                     'letters':    self.letters,
-                     'my_version': VERSION
-                    }
-        
-        group_tpt = os.path.join(opts.templatedir, grkid)
-        group_kid = Template(file=group_tpt)
-        group_kid.repo_data = repo_data
-        self.group_kid = group_kid
-        
-        pkg_tpt = os.path.join(opts.templatedir, pkgkid)
-        pkg_kid = Template(file=pkg_tpt)
-        pkg_kid.repo_data = repo_data
-        self.pkg_kid = pkg_kid
-        
-        for (group_name, group_description, pkgnames) in groups:
-            pkgnames.sort()
-            
-            # See if we need to redo this group
-            group_filename = _mkid(grfile % group_name)
-            
-            group_data = {
-                          'name':        group_name,
-                          'description': group_description,
-                          'filename':    group_filename,
-                          }
-            
-            packages = self._doPackages(repo_data, group_data, pkgnames)
-            group_data['packages'] = packages
-            
-            checksum = self._mkChecksum(repo_data, group_data)
-            if self._hasChanged(group_filename, checksum):
-                # write group file
-                _say('Writing group %s\n' % group_filename, 1)        
-                self.group_kid.group_data = group_data
-                outfile = os.path.join(self.outdir, group_filename)
-                self.group_kid.write(outfile, output='xhtml-strict')
-        
-        self._removeStale()
-        sconn.commit()
-        sys.exit(0)
-    
     def _setupExcludes(self):
         # Formulate exclusion rule
         xarches = []
@@ -290,121 +307,131 @@ class Repoview:
                 self.exclude += ' AND '
                 self.exclude += ' AND '.join(pkgs)
 
-    def _setupOutdir(self):        
+    def _setupOutdir(self):
+        if self.opts.force:
+            # clean slate -- remove everything
+            shutil.rmtree(self.outdir)
         if not os.access(self.outdir, os.R_OK):
             os.mkdir(self.outdir, 0755)
             
         layoutsrc = os.path.join(self.opts.templatedir, 'layout')
         layoutdst = os.path.join(self.outdir, 'layout')
         if os.path.isdir(layoutsrc) and not os.access(layoutdst, os.R_OK):
-            _say('copying layout...', 1)
+            self._say('Copying layout...')
             shutil.copytree(layoutsrc, layoutdst)
-            _say('done\n', 1)
+            self._say('done\n')
+    
+    def _getPackageData(self, pkgname):
+        # fetch versions
+        query = """SELECT pkgKey,
+                          epoch,
+                          version,
+                          release,
+                          arch,
+                          summary,
+                          description,
+                          url,
+                          time_build,
+                          rpm_license,
+                          size_package,
+                          location_href,
+                          rpm_vendor
+                     FROM packages 
+                    WHERE name='%s' AND %s 
+                 ORDER BY arch ASC""" % (pkgname, self.exclude)
+        self.pcursor.execute(query)
         
+        rows = self.pcursor.fetchall()
+        
+        if not rows:
+            # Sorry, nothing found
+            return None
+            
+        if len(rows) == 1:
+            # only one package matching this name
+            versions = [rows[0]]
+        else:
+            # we will use the latest package as the "master" to 
+            # obtain things like summary, description, etc.
+            # go through all available packages and create a dict
+            # keyed by (e,v,r)
+            temp = {}
+            for row in rows:
+                temp[(row[1], row[2], row[3], row[4])] = row
+            
+            keys = temp.keys()
+            keys.sort(_compareEVRA)
+            keys.reverse()
+            versions = []
+            for key in keys:
+                versions.append(temp[key])
+        
+        pkg_filename = _mkid(PKGFILE % pkgname)
+        
+        pkg_data = {
+                    'name':        pkgname,
+                    'filename':    pkg_filename,
+                    'summary':     None,
+                    'description': None,
+                    'url':         None,
+                    'rpm_license': None,
+                    'vendor':      None,
+                    'rpms':        []
+                    }
+        
+        for row in versions:
+            (pkgKey, epoch, version, release, arch, summary,
+             description, url, time_build, rpm_license, size_package,
+             location_href, vendor) = row
+            if pkg_data['summary'] is None:
+                pkg_data['summary'] = summary
+                pkg_data['description'] = description
+                pkg_data['url'] = url
+                pkg_data['rpm_license'] = rpm_license
+                pkg_data['vendor'] = vendor
+            
+            size = _humansize(size_package)
+            
+            # Get latest changelog entry for each version
+            query = '''SELECT author, date, changelog 
+                         FROM changelog WHERE pkgKey=%d 
+                     ORDER BY date DESC LIMIT 1''' % pkgKey
+            self.ocursor.execute(query)
+            (author, time_added, changelog) = self.ocursor.fetchone()
+            # strip email and everything that follows from author
+            try:
+                author = author[:author.index('<')].strip()
+            except ValueError:
+                pass
+            pkg_data['rpms'].append((epoch, version, release, arch,
+                                     time_build, size, location_href,
+                                     author, changelog, time_added))
+        return pkg_data
+    
+    
     def _doPackages(self, repo_data, group_data, pkgnames):
         # this is what we return for the group object
         pkg_tuples = []
         
         for pkgname in pkgnames:
-            pkg_filename = _mkid(pkgfile % pkgname)
+            pkg_filename = _mkid(PKGFILE % pkgname)
             
             if pkgname in self.written.keys():
                 pkg_tuples.append(self.written[pkgname])
                 continue
                             
-            # fetch versions
-            query = """SELECT pkgKey,
-                              epoch,
-                              version,
-                              release,
-                              arch,
-                              summary,
-                              description,
-                              url,
-                              time_build,
-                              rpm_license,
-                              size_package,
-                              location_href,
-                              rpm_vendor
-                         FROM packages 
-                        WHERE name='%s' AND %s 
-                     ORDER BY arch ASC""" % (pkgname, self.exclude)
-            self.pcursor.execute(query)
-                            
-            rows = self.pcursor.fetchall()
+            pkg_data = self._getPackageData(pkgname)
             
-            if not rows:
+            if pkg_data is None:
                 # sometimes comps does not reflect reality
                 continue
-            if len(rows) == 1:
-                # only one package matching this name
-                versions = [rows[0]]
-            else:
-                # we will use the latest package as the "master" to 
-                # obtain things like summary, description, etc.
-                # go through all available packages and create a dict
-                # keyed by (e,v,r)
-                temp = {}
-                for row in rows:
-                    temp[(row[1], row[2], row[3], row[4])] = row
-                
-                keys = temp.keys()
-                keys.sort(self._compareEVRA)
-                keys.reverse()
-                versions = []
-                for key in keys:
-                    versions.append(temp[key])
-
-            
-            pkg_data = {
-                        'name':        pkgname,
-                        'filename':    pkg_filename,
-                        'summary':     None,
-                        'description': None,
-                        'url':         None,
-                        'rpm_license': None,
-                        'vendor':      None,
-                        'rpms':        []
-                        }
-            
-            for row in versions:
-                (pkgKey, epoch, version, release, arch, summary,
-                 description, url, time_build, rpm_license, size_package,
-                 location_href, vendor) = row
-                if pkg_data['summary'] is None:
-                    pkg_data['summary'] = summary
-                    pkg_data['description'] = description
-                    pkg_data['url'] = url
-                    pkg_data['rpm_license'] = rpm_license
-                    pkg_data['vendor'] = vendor
-                
-                built = time.strftime('%Y-%m-%d', 
-                                      time.localtime(int(time_build)))
-                size = _humanSize(size_package)
-                
-                # Get latest changelog entry for each version
-                query = '''SELECT author, date, changelog 
-                             FROM changelog WHERE pkgKey=%d 
-                         ORDER BY date DESC LIMIT 1''' % pkgKey
-                self.ocursor.execute(query)
-                (author, time_added, changelog) = self.ocursor.fetchone()
-                # strip email and everything that follows from author
-                try:
-                    author = author[:author.index('<')].strip()
-                except ValueError:
-                    pass
-                added = time.strftime('%Y-%m-%d', 
-                                      time.localtime(int(time_added)))
-                pkg_data['rpms'].append((epoch, version, release, arch,
-                                         built, size, location_href,
-                                         author, changelog, added))
             
             pkg_tuple = (pkgname, pkg_filename, pkg_data['summary'])
             pkg_tuples.append(pkg_tuple)
             
             checksum = self._mkChecksum(repo_data, group_data, pkg_data)
             if self._hasChanged(pkg_filename, checksum):
-                _say('Writing package %s\n' % pkg_filename, 1)
+                self._say('Writing package %s\n' % pkg_filename)
                 self.pkg_kid.group_data = group_data
                 self.pkg_kid.pkg_data = pkg_data
                 outfile = os.path.join(self.outdir, pkg_filename)
@@ -412,12 +439,11 @@ class Repoview:
                 self.written[pkgname] = pkg_tuple
             else:
                 self.written[pkgname] = pkg_tuple
-        
-        return pkg_tuples
-
-    def _compareEVRA(self, one, two):
-        return compareEVR(one[:3], two[:3])
             
+            
+                
+        return pkg_tuples
+        
     def _mkChecksum(self, *args):
         mangle = []
         for data in args:
@@ -455,7 +481,7 @@ class Repoview:
     
     def _removeStale(self):
         for filename in self.state_data.keys():
-            _say('Removing stale file %s\n' % filename, 1)
+            self._say('Removing stale file %s\n' % filename)
             fullpath = os.path.join(self.outdir, filename)
             if os.access(fullpath, os.W_OK):
                 os.unlink(fullpath)
@@ -480,71 +506,85 @@ class Repoview:
         unzfd = open(unzname, 'w')
         
         while True:
-            data = zfd.read(8192)
-            if not data: break
+            data = zfd.read(16384)
+            if not data: 
+                break
             unzfd.write(data)
         zfd.close()
         unzfd.close()
         
         return unzname
     
-    def _getComps(self, compsxml):
+    def _setupCompsGroups(self, compsxml):
         """
         Utility method for parsing comps.xml.
         [name, description, [packages]]
         """
         from yum.comps import Comps
         
-        _say('Parsing comps.xml:', 1)
-        groups = []        
+        self._say('Parsing comps.xml:')
         comps = Comps()
         comps.add(compsxml)
         
-        pct = 0
         for group in comps.groups:
-            if not group.user_visible:
+            if not group.user_visible or not group.packages:
                 continue
-            pct += 1
-            groups.append([group.name, group.description, group.packages])                
-            _say('\rParsing comps.xml: %s groups' % pct)
-        _say('...done\n', 1)
-        return groups
+            group_filename = _mkid(GRPFILE % group.name)
+            self.groups.append([group.name, group_filename, group.description, 
+                                group.packages])                
+        self._say('...done\n')
     
-    def _getGroups(self):
-        _say('Collecting group information...', 1)
-        groups = []
+    def _setupRpmGroups(self):
+        self._say('Collecting group information...')
         query = 'SELECT DISTINCT rpm_group FROM packages ORDER BY rpm_group ASC'
         self.pcursor.execute(query)
         
-        pct = 0
         for (rpmgroup,) in self.pcursor.fetchall():  
-            pct += 1    
+            qgroup = rpmgroup.replace("'", "''")
             query = """SELECT name 
                          FROM packages 
-                        WHERE rpm_group='%s' 
-                     ORDER BY name""" % rpmgroup.replace("'", "''");
+                        WHERE rpm_group='%s'
+                          AND %s
+                     ORDER BY name""" % (qgroup, self.exclude)
             self.pcursor.execute(query)
             pkgnames = []
             for (pkgname,) in self.pcursor.fetchall():
                 pkgnames.append(pkgname)
-            groups.append([rpmgroup, None, pkgnames])
-            _say('\rCollecting group information: %s groups' % pct)
-        _say('...done\n', 1)
-        return groups
+            
+            group_filename = _mkid(GRPFILE % rpmgroup)
+            self.groups.append([rpmgroup, group_filename, None, pkgnames])
+        self._say('...done\n')
     
-    def _getLetterGroups(self):
-        _say('Collecting letters...', 1)
-        groups = []
+    def _getLatestPackages(self, limit=30):
+        self._say('Collecting latest packages...')
+        query = """SELECT DISTINCT name, 
+                          version,
+                          release,
+                          time_build 
+                     FROM packages 
+                    WHERE %s
+                 ORDER BY time_build DESC LIMIT %s""" % (self.exclude, limit)
+        self.pcursor.execute(query)
+        
+        latest = []
+        for (pkgname, version, release, built) in self.pcursor.fetchall():
+            filename = _mkid(PKGFILE % pkgname)
+            latest.append((pkgname, filename, version, release, built))
+        
+        self._say('done\n')
+        return latest
+        
+    def _setupLetterGroups(self):
+        self._say('Collecting letters...')
         query = """SELECT DISTINCT substr(upper(name), 0, 1) AS letter 
                      FROM packages 
                     WHERE %s
                  ORDER BY letter""" % self.exclude
         self.pcursor.execute(query)
         
-        pct = 0
+        letters = ''
         for (letter,) in self.pcursor.fetchall():
-            pct += 1
-            self.letters += letter
+            letters += letter
             rpmgroup = 'Letter %s' % letter
             description = 'Packages beginning with letter "%s".' % letter
         
@@ -556,106 +596,79 @@ class Repoview:
             self.pcursor.execute(query)
             for (pkgname,) in self.pcursor.fetchall():
                 pkgnames.append(pkgname)
-            groups.append([rpmgroup, description, pkgnames])
-            _say('\rCollecting letters: %s letters' % pct)
-        _say('...done\n', 1)
-        return groups
+                
+            group_filename = _mkid(GRPFILE % rpmgroup)
+            letter_group = (rpmgroup, group_filename, description, pkgnames)
+            self.letter_groups.append(letter_group)
+        self._say('...done\n')
+        return letters
     
-    def _obsolete(self):
-        ## Do RSS feed
-        if self.url is not None:
-            _say('generating rss feed...', 1)
-            isoformat = '%a, %d %b %Y %H:%M:%S %z'
-            tb = TreeBuilder()
-            out = os.path.join(self.outdir, rssfile)
-            rss = tb.start('rss', {'version': '2.0'})
-            tb.start('channel')
-            tb.start('title')
-            tb.data(title)
-            tb.end('title')
-            tb.start('link')
-            tb.data('%s/repoview/%s' % (url, rssfile))
-            tb.end('link')
-            tb.start('description')
-            tb.data('Latest packages for %s' % title)
-            tb.end('description')
-            tb.start('lastBuildDate')
-            tb.data(time.strftime(isoformat))
-            tb.end('lastBuildDate')
-            tb.start('generator')
-            tb.data('Repoview-%s' % VERSION)
-            tb.end('generator')
-            
-            rsstmpl = os.path.join(templatedir, rsskid)
-            kobj = Template(file=rsstmpl, stats=stats, 
-                            mkLinkUrl=self.mkLinkUrl)
-            for pkg in self.groups['__latest__'].getSortedList(trim=0):
-                tb.start('item')
-                tb.start('guid')
-                tb.data(self.mkLinkUrl(pkg, isrss=1))
-                tb.end('guid')
-                tb.start('link')
-                tb.data(self.mkLinkUrl(pkg, isrss=1))
-                tb.end('link')
-                tb.start('pubDate')
-                tb.data(pkg.getTime(isoformat))
-                tb.end('pubDate')
-                tb.start('title')
-                tb.data('Update: %s-%s-%s' % (pkg.n, pkg.v, pkg.r))
-                tb.end('title')
-                tb.start('category')
-                tb.data(pkg.n)
-                tb.end('category')
-                tb.start('category')
-                tb.data(pkg.group.name)
-                tb.end('category')
-                kobj.package = pkg
-                description = kobj.serialize()
-                tb.start('description')
-                tb.data(description)
-                tb.end('description')
-                tb.end('item')
-            tb.end('channel')
-            tb.end('rss')
-            et = ElementTree(rss)
-            et.write(out, 'utf-8')
-            _say('done\n')
+    def _doRss(self, repo_data, latest):
+        self._say('Generating rss feed...')
+        tb = TreeBuilder()
+        out = os.path.join(self.outdir, RSSFILE)
+        tb.start('rss', {'version': '2.0'})
+        tb.start('channel')
+        tb.start('title')
+        tb.data(repo_data['title'])
+        tb.end('title')
+        tb.start('link')
+        tb.data('%s/repoview/%s' % (self.opts.url, RSSFILE))
+        tb.end('link')
+        tb.start('description')
+        tb.data('Latest packages for %s' % repo_data['title'])
+        tb.end('description')
+        tb.start('lastBuildDate')
+        tb.data(time.strftime(ISOFORMAT))
+        tb.end('lastBuildDate')
+        tb.start('generator')
+        tb.data('Repoview-%s' % repo_data['my_version'])
+        tb.end('generator')
         
-        _say('writing checksum...', 1)
-        chkfile = os.path.join(self.outdir, 'checksum')
-        fh = open(chkfile, 'w')
-        if RepoMD.isOld:
-            fh.write(self.repodata['primary']['checksum'][1])
-        else:
-            fh.write(self.repodata['primary'].checksum[1])
-        fh.close()
-        _say('done\n')
-
-        _say('Moving new repoview dir in place...', 1)
-        # Delete everything except for self.outdir.
-        for root, dirs, files in os.walk(self.homedir):
-            if self.outdirname in dirs:
-                dirs.remove(self.outdirname)
-            for d in dirs:
-                shutil.rmtree(os.path.join(root, d))
-            for f in files:
-                os.remove(os.path.join(root, f))
-            break
-        # Move new files into home.
-        for root, dirs, files in os.walk(self.outdir):
-            for d in dirs:
-                shutil.move(os.path.join(root, d), 
-                            os.path.join(self.homedir, d))
-            for f in files:
-                os.rename(os.path.join(root, f), 
-                          os.path.join(self.homedir, f))
-            break
-        os.rmdir(self.outdir)
-        _say('done\n')
+        rss_tpt = os.path.join(self.opts.templatedir, RSSKID)
+        rss_kid = Template(file=rss_tpt)
+        rss_kid.repo_data = repo_data
+        rss_kid.url = self.opts.url
+        
+        for row in latest:
+            pkg_data = self._getPackageData(row[0])
+            
+            rpm = pkg_data['rpms'][0]
+            (e, v, r, a, built, size, loc, author, log, added) = rpm
+            tb.start('item')
+            tb.start('guid')
+            tb.data('%s/repoview/%s+%s:%s-%s.%s' % (self.opts.url, 
+                                                    pkg_data['filename'], 
+                                                    e, v, r, a))
+            tb.end('guid')
+            tb.start('link')
+            tb.data('%s/repoview/%s' % (self.opts.url, pkg_data['filename']))
+            tb.end('link')
+            tb.start('pubDate')
+            tb.data(time.strftime(ISOFORMAT, time.localtime(int(built))))
+            tb.end('pubDate')
+            tb.start('title')
+            tb.data('Update: %s-%s-%s' % (pkg_data['name'], v, r))
+            tb.end('title')
+            rss_kid.pkg_data = pkg_data
+            description = rss_kid.serialize()
+            tb.start('description')
+            tb.data(description)
+            tb.end('description')
+            tb.end('item')
+        
+        tb.end('channel')
+        tb.end('rss')
+        rss = tb.close()
+        
+        et = ElementTree(rss)
+        out = os.path.join(self.outdir, RSSFILE)
+        et.write(out, 'utf-8')
+        self._say('done\n')
+        
 
 def main():
     "Main program code"
-    global quiet #IGNORE:W0121
     usage = 'usage: %prog [options] repodir'
     parser = OptionParser(usage=usage, version='%prog ' + VERSION)
     parser.add_option('-i', '--ignore-package', dest='ignore', action='append',
@@ -702,9 +715,8 @@ def main():
     if not args:
         parser.error('Incorrect invocation.')
             
-    quiet = opts.quiet
-    repodir = args[0]
-    rv = Repoview(repodir, opts)
+    opts.repodir = args[0]
+    Repoview(opts)
 
 if __name__ == '__main__':
     main()

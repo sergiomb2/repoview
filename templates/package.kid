@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<?python
+import time
+def ymd(stamp):
+    return time.strftime('%Y-%m-%d', time.localtime(int(stamp)))
+?>
 <html xmlns:py="http://purl.org/kid/ns#">
 <head>
   <title py:content="'RepoView: %s' % repo_data['title']"/>
@@ -55,7 +60,7 @@
               [<span style="white-space: nowrap" py:content="size"/>]</td>
             <td valign="top">
               <strong>Changelog</strong>
-              by <span py:content="'%s (%s)' % (author, added)"/>:
+              by <span py:content="'%s (%s)' % (author, ymd(added))"/>:
               <pre style="margin: 0pt 0pt 5pt 5pt" py:content="log"/>
             </td>
         </tr>
