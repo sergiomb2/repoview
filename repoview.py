@@ -119,9 +119,9 @@ class Repoview:
         self.groups        = []
         self.letter_groups = []
         
-        self.pcursor = None # primary.sqlite
-        self.ocursor = None # other.sqlite
-        self.scursor = None # state db
+        self.pconn = None # primary.sqlite
+        self.oconn = None # other.sqlite
+        self.sconn = None # state db
         
         self.setup_repo()
         self.setup_outdir()
@@ -200,7 +200,7 @@ class Repoview:
                 self.do_rss(repo_data, latest)
         
         self.remove_stale()
-        self.scursor.connection.commit()
+        self.sconn.commit()
 
     def setup_state_db(self):
         """
@@ -222,23 +222,23 @@ class Repoview:
             # state_db not found, go into force mode
             self.opts.force = True
         
-        sconn = sqlite.connect(statedb)
-        self.scursor = sconn.cursor()
-        
+        self.sconn = sqlite.connect(statedb)
+        scursor = self.sconn.cursor()
+
         try:
             query = """CREATE TABLE state (
                               filename TEXT UNIQUE,
                               checksum TEXT)"""
-            self.scursor.execute(query)
-        except sqlite.OperationalError:
+            scursor.execute(query)
+        except:
             # naively pretend this only happens when the table already exists
             pass
         
         # read all state data into memory to track orphaned files
         query = """SELECT filename, checksum FROM state"""
-        self.scursor.execute(query)
+        scursor.execute(query)
         while True:
-            row = self.scursor.fetchone()
+            row = scursor.fetchone()
             if row is None:
                 break
             self.state_data[row[0]] = row[1]        
@@ -291,14 +291,12 @@ class Repoview:
         
         self.say('Opening primary database...')
         primary = self.bz_handler(primary)
-        pconn = sqlite.connect(primary)
-        self.pcursor = pconn.cursor()
+        self.pconn = sqlite.connect(primary)
         self.say('done\n')
         
         self.say('Opening changelogs database...')
         other = self.bz_handler(other)
-        oconn = sqlite.connect(other)
-        self.ocursor = oconn.cursor()
+        self.oconn = sqlite.connect(other)
         self.say('done\n')
         
         if comps:
@@ -370,9 +368,10 @@ class Repoview:
                      FROM packages 
                     WHERE name='%s' AND %s 
                  ORDER BY arch ASC""" % (pkgname, self.exclude)
-        self.pcursor.execute(query)
+        pcursor = self.pconn.cursor()
+        pcursor.execute(query)
         
-        rows = self.pcursor.fetchall()
+        rows = pcursor.fetchall()
         
         if not rows:
             # Sorry, nothing found
@@ -427,8 +426,9 @@ class Repoview:
             query = '''SELECT author, date, changelog 
                          FROM changelog WHERE pkgKey=%d 
                      ORDER BY date DESC LIMIT 1''' % pkg_key
-            self.ocursor.execute(query)
-            (author, time_added, changelog) = self.ocursor.fetchone()
+            ocursor = self.oconn.cursor()
+            ocursor.execute(query)
+            (author, time_added, changelog) = ocursor.fetchone()
             # strip email and everything that follows from author
             try:
                 author = author[:author.index('<')].strip()
@@ -500,19 +500,19 @@ class Repoview:
         necessary state database tracking bits.
         """
         # calculate checksum
-    
+        scursor = self.sconn.cursor()
         if filename not in self.state_data.keys():
             # totally new entry
             query = '''INSERT INTO state (filename, checksum)
                                   VALUES ('%s', '%s')''' % (filename, checksum)
-            self.scursor.execute(query)
+            scursor.execute(query)
             return True
         if self.state_data[filename] != checksum:
             # old entry, but changed
             query = """UPDATE state 
                           SET checksum='%s' 
                         WHERE filename='%s'""" % (checksum, filename)
-            self.scursor.execute(query)
+            scursor.execute(query)
             
             # remove it from state_data tracking, so we know we've seen it
             del self.state_data[filename]
@@ -526,13 +526,14 @@ class Repoview:
         Remove errant stale files from the output directory, left from previous
         repoview runs.
         """
+        scursor = self.sconn.cursor()
         for filename in self.state_data.keys():
             self.say('Removing stale file %s\n' % filename)
             fullpath = os.path.join(self.outdir, filename)
             if os.access(fullpath, os.W_OK):
                 os.unlink(fullpath)
             query = """DELETE FROM state WHERE filename='%s'""" % filename
-            self.scursor.execute(query)
+            scursor.execute(query)
     
     def bz_handler(self, dbfile):
         """
@@ -585,18 +586,19 @@ class Repoview:
         """        
         self.say('Collecting group information...')
         query = 'SELECT DISTINCT rpm_group FROM packages ORDER BY rpm_group ASC'
-        self.pcursor.execute(query)
+        pcursor = self.pconn.cursor()
+        pcursor.execute(query)
         
-        for (rpmgroup,) in self.pcursor.fetchall():  
+        for (rpmgroup,) in pcursor.fetchall():  
             qgroup = rpmgroup.replace("'", "''")
             query = """SELECT name 
                          FROM packages 
                         WHERE rpm_group='%s'
                           AND %s
                      ORDER BY name""" % (qgroup, self.exclude)
-            self.pcursor.execute(query)
+            pcursor.execute(query)
             pkgnames = []
-            for (pkgname,) in self.pcursor.fetchall():
+            for (pkgname,) in pcursor.fetchall():
                 pkgnames.append(pkgname)
             
             group_filename = _mkid(GRPFILE % rpmgroup)
@@ -615,10 +617,11 @@ class Repoview:
                      FROM packages 
                     WHERE %s
                  ORDER BY time_build DESC LIMIT %s""" % (self.exclude, limit)
-        self.pcursor.execute(query)
+        pcursor = self.pconn.cursor()
+        pcursor.execute(query)
         
         latest = []
-        for (pkgname, version, release, built) in self.pcursor.fetchall():
+        for (pkgname, version, release, built) in pcursor.fetchall():
             filename = _mkid(PKGFILE % pkgname)
             latest.append((pkgname, filename, version, release, built))
         
@@ -634,10 +637,11 @@ class Repoview:
                      FROM packages 
                     WHERE %s
                  ORDER BY letter""" % self.exclude
-        self.pcursor.execute(query)
+        pcursor = self.pconn.cursor()
+        pcursor.execute(query)
         
         letters = ''
-        for (letter,) in self.pcursor.fetchall():
+        for (letter,) in pcursor.fetchall():
             letters += letter
             rpmgroup = 'Letter %s' % letter
             description = 'Packages beginning with letter "%s".' % letter
@@ -647,8 +651,8 @@ class Repoview:
                          FROM packages
                         WHERE name LIKE '%s%%'
                           AND %s""" % (letter, self.exclude)
-            self.pcursor.execute(query)
-            for (pkgname,) in self.pcursor.fetchall():
+            pcursor.execute(query)
+            for (pkgname,) in pcursor.fetchall():
                 pkgnames.append(pkgname)
                 
             group_filename = _mkid(GRPFILE % rpmgroup)
