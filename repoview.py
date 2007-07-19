@@ -128,7 +128,8 @@ class Repoview:
         self.setup_state_db()
         self.setup_excludes()
         
-        self.setup_rpm_groups()
+        if not self.groups:
+            self.setup_rpm_groups()
         
         letters = self.setup_letter_groups()
         
@@ -146,6 +147,7 @@ class Repoview:
         pkg_kid.repo_data = repo_data
         self.pkg_kid = pkg_kid
         
+        count = 0
         for group_data in self.groups + self.letter_groups:
             (grp_name, grp_filename, grp_description, pkgnames) = group_data
             pkgnames.sort()
@@ -157,6 +159,14 @@ class Repoview:
                           }
             
             packages = self.do_packages(repo_data, group_data, pkgnames)
+            
+            if not packages:
+                # Empty groups are ignored
+                del self.groups[count]
+                continue
+            
+            count += 1
+            
             group_data['packages'] = packages
             
             checksum = self.mk_checksum(repo_data, group_data)
@@ -169,6 +179,7 @@ class Repoview:
         
         latest = self.get_latest_packages()
         repo_data['latest'] = latest
+        repo_data['groups'] = self.groups
         
         checksum = self.mk_checksum(repo_data)
         if self.has_changed('index.html', checksum):
@@ -203,9 +214,13 @@ class Repoview:
         else:
             statedb = os.path.join(self.outdir, 'state.sqlite')
             
-        if self.opts.force and os.access(statedb, os.W_OK):
-            # clean slate -- remove state db and start over
-            os.unlink(statedb)
+        if os.access(statedb, os.W_OK):
+            if self.opts.force:
+                # clean slate -- remove state db and start over
+                os.unlink(statedb)
+        else:
+            # state_db not found, go into force mode
+            self.opts.force = True
         
         sconn = sqlite.connect(statedb)
         self.scursor = sconn.cursor()
@@ -567,11 +582,7 @@ class Repoview:
     def setup_rpm_groups(self):
         """
         When comps is not around, we use the (useless) RPM groups.
-        """
-        if self.groups:
-            # Must have already collected via comps.
-            return
-        
+        """        
         self.say('Collecting group information...')
         query = 'SELECT DISTINCT rpm_group FROM packages ORDER BY rpm_group ASC'
         self.pcursor.execute(query)
