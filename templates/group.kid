@@ -34,7 +34,7 @@
         </ul>
         <p class="footernote">
           Listing created by
-          <a href="http://linux.duke.edu/projects/mini/repoview/"
+          <a href="http://mricon.com/trac/wiki/Repoview"
             class="repoview" py:content="'Repoview-%s' % repo_data['my_version']"/>
         </p>
     </div>
