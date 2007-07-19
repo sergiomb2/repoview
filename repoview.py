@@ -568,6 +568,10 @@ class Repoview:
         """
         When comps is not around, we use the (useless) RPM groups.
         """
+        if self.groups:
+            # Must have already collected via comps.
+            return
+        
         self.say('Collecting group information...')
         query = 'SELECT DISTINCT rpm_group FROM packages ORDER BY rpm_group ASC'
         self.pcursor.execute(query)
