@@ -1,4 +1,4 @@
-Version 0.6:
+Version 0.6.0:
 	* Big rewrite that breaks all compatibility with previous versions, except
 	  for most command-line switches.
 	* Introduces state-tracking, so small changes to the respository will
