@@ -34,6 +34,14 @@ default: ./templates. The template directory must contain four
 required template files: index.kid, group.kid, package.kid, rss.kid and 
 the "layout" dir which will be copied into the repoview directory.
 .TP
+.B \-o, \-\-output\-dir DIR
+Create the repoview pages in this subdirectory inside
+the repository (default: "repoview")
+.TP
+.B \-s, \-\-state\-dir DIR
+Create the state-tracking db in this directory
+(default: store in output directory)
+.TP
 .B \-t, \-\-title TITLE
 Describe the repository in a few words. By default "RepoView" is used. 
 E.g.:
@@ -46,14 +54,6 @@ Repository URL to use when generating the RSS feed. E.g.:
 \-u "http://fedoraproject.org/extras/5/i386"
 .br
 Not providing a url will disable RSS feed generation.
-.TP
-.B \-s, \-\-srpm\-url URL
-Repository base URL for Source RPM packages. E.g.:
-.br
-\-s "http://fedoraproject.org/extras/4/SRPMS"
-.br
-Not providing a url will not link src.rpm packages from 
-binary package page.
 .TP
 .B \-f, \-\-force
 Regenerate the pages even if the repomd checksum has not changed.
@@ -96,7 +96,6 @@ This will generate an RSS feed:
 .SH "AUTHORS"
 .LP 
 Konstantin Ryabitsev <icon@fedoraproject.org>
-Michael Schwendt <bugs.michael@gmx.net>
 
 .SH "SEE ALSO"
 .LP 
