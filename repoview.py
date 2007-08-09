@@ -488,12 +488,17 @@ class Repoview:
                      ORDER BY date DESC LIMIT 1''' % pkg_key
             ocursor = self.oconn.cursor()
             ocursor.execute(query)
-            (author, time_added, changelog) = ocursor.fetchone()
-            # strip email and everything that follows from author
-            try:
-                author = author[:author.index('<')].strip()
-            except ValueError:
-                pass
+            orow = ocursor.fetchone()
+            if not orow:
+                author = time_added = changelog = None
+            else:
+                (author, time_added, changelog) = orow
+                # strip email and everything that follows from author
+                try:
+                    author = author[:author.index('<')].strip()
+                except ValueError:
+                    pass
+                
             pkg_data['rpms'].append((epoch, version, release, arch,
                                      time_build, size, location_href,
                                      author, changelog, time_added))
