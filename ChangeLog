@@ -1,3 +1,10 @@
+Version 0.6.1:
+	* Allow blank changelogs (bug #8)
+	* Fix traceback when group names have case differences (rh #300151)
+	* Add a --comps cmdline option to allow for external comps files
+	* Allow google-indexing of the index page, to make it easier to find
+	  mirrors.
+
 Version 0.6.0:
 	* Big rewrite that breaks all compatibility with previous versions, except
 	  for most command-line switches.

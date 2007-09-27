@@ -10,7 +10,7 @@ def ymd(stamp):
   <link rel="stylesheet" href="layout/repostyle.css" type="text/css" />
   <link py:if="url is not None"
 	  rel="alternate" type="application/rss+xml" title="RSS" href="latest-feed.xml" />
-  <meta name="robots" content="noindex,follow" />
+  <meta name="robots" content="index,follow" />
 </head>
 <body>
     <div class="levbar">

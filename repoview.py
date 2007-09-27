@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.0'
+VERSION = '0.6.1'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
@@ -326,6 +326,9 @@ class Repoview:
         other = self.bz_handler(other)
         self.oconn = sqlite.connect(other)
         self.say('done\n')
+        
+        if self.opts.comps:
+            comps = self.opts.comps
         
         if comps:
             self.setup_comps_groups(comps)
@@ -690,7 +693,9 @@ class Repoview:
         @rtype: void
         """        
         self.say('Collecting group information...')
-        query = 'SELECT DISTINCT rpm_group FROM packages ORDER BY rpm_group ASC'
+        query = """SELECT DISTINCT lower(rpm_group) AS rpm_group 
+                     FROM packages 
+                 ORDER BY rpm_group ASC"""
         pcursor = self.pconn.cursor()
         pcursor.execute(query)
         
@@ -698,7 +703,7 @@ class Repoview:
             qgroup = rpmgroup.replace("'", "''")
             query = """SELECT name 
                          FROM packages 
-                        WHERE rpm_group='%s'
+                        WHERE lower(rpm_group)='%s'
                           AND %s
                      ORDER BY name""" % (qgroup, self.exclude)
             pcursor.execute(query)
@@ -899,6 +904,9 @@ def main():
     parser.add_option('-q', '--quiet', dest='quiet', action='store_true',
         default=0,
         help='Do not output anything except fatal errors.')
+    parser.add_option('-c', '--comps', dest='comps',
+        default=None,
+        help='Use an alternative comps.xml file (default: off)')
     (opts, args) = parser.parse_args()
     if not args:
         parser.error('Incorrect invocation.')
