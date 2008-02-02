@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.1'
+VERSION = '0.6.2'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
@@ -168,10 +168,12 @@ class Repoview:
                     }
         
         group_kid = Template(file=os.path.join(opts.templatedir, GRPKID))
+        group_kid.assume_encoding = "utf-8"
         group_kid.repo_data = repo_data
         self.group_kid = group_kid
         
         pkg_kid = Template(file=os.path.join(opts.templatedir, PKGKID))
+        pkg_kid.assume_encoding = "utf-8"
         pkg_kid.repo_data = repo_data
         self.pkg_kid = pkg_kid
         
@@ -215,6 +217,7 @@ class Repoview:
             self.say('Writing index.html...')
             idx_tpt = os.path.join(self.opts.templatedir, IDXKID)
             idx_kid = Template(file=idx_tpt)
+            idx_kid.assume_encoding = "utf-8"
             idx_kid.repo_data = repo_data
             idx_kid.url = self.opts.url
             idx_kid.latest = latest
@@ -374,7 +377,7 @@ class Repoview:
         
         @rtype: void
         """
-        if self.opts.force:
+        if self.opts.force and os.access(self.outdir, os.R_OK):
             # clean slate -- remove everything
             shutil.rmtree(self.outdir)
         if not os.access(self.outdir, os.R_OK):
@@ -393,14 +396,15 @@ class Repoview:
         in a dict:
         
         pkg_data = {
-                    'name':        str,
-                    'filename':    str,
-                    'summary':     str,
-                    'description': str,
-                    'url':         str,
-                    'rpm_license': str,
-                    'vendor':      str,
-                    'rpms':        []
+                    'name':          str,
+                    'filename':      str,
+                    'summary':       str,
+                    'description':   str,
+                    'url':           str,
+                    'rpm_license':   str,
+                    'rpm_sourcerpm': str,
+                    'vendor':        str,
+                    'rpms':          []
                     }
                     
         the "rpms" key is a list of tuples with the following members:
@@ -425,6 +429,7 @@ class Repoview:
                           url,
                           time_build,
                           rpm_license,
+                          rpm_sourcerpm,
                           size_package,
                           location_href,
                           rpm_vendor
@@ -462,25 +467,27 @@ class Repoview:
         pkg_filename = _mkid(PKGFILE % pkgname)
         
         pkg_data = {
-                    'name':        pkgname,
-                    'filename':    pkg_filename,
-                    'summary':     None,
-                    'description': None,
-                    'url':         None,
-                    'rpm_license': None,
-                    'vendor':      None,
-                    'rpms':        []
+                    'name':          pkgname,
+                    'filename':      pkg_filename,
+                    'summary':       None,
+                    'description':   None,
+                    'url':           None,
+                    'rpm_license':   None,
+                    'rpm_sourcerpm': None,                    
+                    'vendor':        None,
+                    'rpms':          []
                     }
         
         for row in versions:
             (pkg_key, epoch, version, release, arch, summary,
-             description, url, time_build, rpm_license, size_package,
-             location_href, vendor) = row
+             description, url, time_build, rpm_license, rpm_sourcerpm,
+             size_package, location_href, vendor) = row
             if pkg_data['summary'] is None:
                 pkg_data['summary'] = summary
                 pkg_data['description'] = description
                 pkg_data['url'] = url
                 pkg_data['rpm_license'] = rpm_license
+                pkg_data['rpm_sourcerpm'] = rpm_sourcerpm
                 pkg_data['vendor'] = vendor
             
             size = _humansize(size_package)
@@ -681,7 +688,7 @@ class Repoview:
         for group in comps.groups:
             if not group.user_visible or not group.packages:
                 continue
-            group_filename = _mkid(GRPFILE % group.name)
+            group_filename = _mkid(GRPFILE % group.groupid)
             self.groups.append([group.name, group_filename, group.description, 
                                 group.packages])                
         self.say('done\n')
@@ -815,6 +822,7 @@ class Repoview:
         
         rss_tpt = os.path.join(self.opts.templatedir, RSSKID)
         rss_kid = Template(file=rss_tpt)
+        rss_kid.assume_encoding = "utf-8"
         rss_kid.repo_data = repo_data
         rss_kid.url = self.opts.url
         
@@ -834,7 +842,7 @@ class Repoview:
             etb.data('%s/repoview/%s' % (self.opts.url, pkg_data['filename']))
             etb.end('link')
             etb.start('pubDate')
-            etb.data(time.strftime(ISOFORMAT, time.localtime(int(built))))
+            etb.data(time.strftime(ISOFORMAT, time.gmtime(int(built))))
             etb.end('pubDate')
             etb.start('title')
             etb.data('Update: %s-%s-%s' % (pkg_data['name'], version, release))
