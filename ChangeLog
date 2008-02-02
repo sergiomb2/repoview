@@ -1,3 +1,9 @@
+Version 0.6.2:
+	* Fix traceback when there are non-unique group names (bz#300151, #4)
+	* Use gmtime instead of localtime when generating rss
+	* Expose rpm_sourcerpm in repoview pkg_data dict (#3)
+	* Apply utf-8 patch from kkofler (#2)
+
 Version 0.6.1:
 	* Allow blank changelogs (bug #8)
 	* Fix traceback when group names have case differences (rh #300151)
