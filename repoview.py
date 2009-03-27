@@ -734,10 +734,7 @@ class Repoview:
         @rtype: list
         """
         self.say('Collecting latest packages...')
-        query = """SELECT DISTINCT name, 
-                          version,
-                          release,
-                          time_build 
+        query = """SELECT DISTINCT name
                      FROM packages 
                     WHERE %s
                  ORDER BY time_build DESC LIMIT %s""" % (self.exclude, limit)
@@ -745,8 +742,16 @@ class Repoview:
         pcursor.execute(query)
         
         latest = []
-        for (pkgname, version, release, built) in pcursor.fetchall():
-            filename = _mkid(PKGFILE % pkgname)
+        query = """SELECT version, release, time_build
+                     FROM packages
+                    WHERE name = '%s'
+                    ORDER BY time_build DESC LIMIT 1"""
+        for (pkgname,) in pcursor.fetchall():
+            filename = _mkid(PKGFILE % pkgname.replace("'", "''"))
+
+            pcursor.execute(query % pkgname)
+            (version, release, built) = pcursor.fetchone()
+
             latest.append((pkgname, filename, version, release, built))
         
         self.say('done\n')
@@ -782,7 +787,7 @@ class Repoview:
             for (pkgname,) in pcursor.fetchall():
                 pkgnames.append(pkgname)
                 
-            group_filename = _mkid(GRPFILE % rpmgroup)
+            group_filename = _mkid(GRPFILE % rpmgroup).lower()
             letter_group = (rpmgroup, group_filename, description, pkgnames)
             self.letter_groups.append(letter_group)
         self.say('done\n')
