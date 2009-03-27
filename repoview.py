@@ -38,7 +38,7 @@ import os
 import shutil
 import sys
 import time
-import md5
+import hashlib as md5
 
 from optparse import OptionParser
 from kid      import Template
@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.2'
+VERSION = '0.6.3'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
@@ -83,7 +83,7 @@ def _mkid(text):
     @rtype:  str
     """
     text = text.replace('/', '.')
-    text = text.replace(' ', '_').lower()
+    text = text.replace(' ', '_')
     return text
 
 def _humansize(bytes):
@@ -307,15 +307,15 @@ class Repoview:
                 comps = os.path.join(self.opts.repodir, href)
         
         if primary is None or dbversion is None:
-            self.say('Sorry, sqlite files not found in the repository. Please '
-                      'rerun createrepo with a -d flag and try again.')
+            self.say('Sorry, sqlite files not found in the repository.\n'
+                     'Please rerun createrepo with a -d flag and try again.\n')
             sys.exit(1)
         
         if int(dbversion) > SUPPORTED_DB_VERSION:
             self.say('Sorry, the db_version in the repository is %s, but '
-                      'repoview only supports versions up to %s. Please check '
-                      'for a newer repoview version.' % (dbversion, 
-                                                         SUPPORTED_DB_VERSION))
+                     'repoview only supports versions up to %s. Please check '
+                     'for a newer repoview version.\n' % (dbversion, 
+                                                          SUPPORTED_DB_VERSION))
             sys.exit(1)
         
         self.say('done\n')
@@ -708,7 +708,7 @@ class Repoview:
         
         for (rpmgroup,) in pcursor.fetchall():  
             qgroup = rpmgroup.replace("'", "''")
-            query = """SELECT name 
+            query = """SELECT DISTINCT name 
                          FROM packages 
                         WHERE lower(rpm_group)='%s'
                           AND %s

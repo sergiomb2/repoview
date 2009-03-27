@@ -1,3 +1,9 @@
+Version 0.6.3:
+	* Fix traceback when there are packages with same name but with different
+	  case (muse vs MuSE rhbz#484525)
+	* Use DISTINCT when listing packages in RPM group pages.
+	* Import md5 as hashlib for compatibility with future pythons.
+
 Version 0.6.2:
 	* Fix traceback when there are non-unique group names (bz#300151, #4)
 	* Use gmtime instead of localtime when generating rss
