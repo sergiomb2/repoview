@@ -34,7 +34,7 @@
         </ul>
         <p class="footernote">
           Listing created by
-          <a href="http://mricon.com/trac/wiki/Repoview"
+          <a href="https://fedorahosted.org/repoview/"
             class="repoview" py:content="'Repoview-%s' % repo_data['my_version']"/>
         </p>
     </div>
