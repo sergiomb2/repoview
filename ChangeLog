@@ -3,6 +3,7 @@ Version 0.6.3:
 	  case (muse vs MuSE rhbz#484525)
 	* Use DISTINCT when listing packages in RPM group pages.
 	* Import md5 as hashlib for compatibility with future pythons.
+	* Fix URLs to point to the fedorahosted.org location.
 
 Version 0.6.2:
 	* Fix traceback when there are non-unique group names (bz#300151, #4)
