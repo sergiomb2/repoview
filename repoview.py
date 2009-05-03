@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.3'
+VERSION = '0.6.4'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
@@ -765,7 +765,7 @@ class Repoview:
         @rtype:  str
         """
         self.say('Collecting letters...')
-        query = """SELECT DISTINCT substr(upper(name), 0, 1) AS letter 
+        query = """SELECT DISTINCT substr(upper(name), 1, 1) AS letter 
                      FROM packages 
                     WHERE %s
                  ORDER BY letter""" % self.exclude
