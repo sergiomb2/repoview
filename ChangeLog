@@ -1,4 +1,32 @@
-Version 0.6:
+Version 0.6.5:
+	* Apply another patch from Remi Collet to fix rhbz#566789
+
+Version 0.6.4:
+	* Apply patch from Remi Collet for a change of behaviour in sqlite 
+	  (rhbz#498752, F11)
+
+Version 0.6.3:
+	* Fix traceback when there are packages with same name but with different
+	  case (muse vs MuSE rhbz#484525)
+	* Use DISTINCT when listing packages in RPM group pages.
+	* Import md5 as hashlib for compatibility with future pythons.
+	* Fix URLs to point to the fedorahosted.org location.
+	* Fix the way latest packages are generated (fewer dupes).
+
+Version 0.6.2:
+	* Fix traceback when there are non-unique group names (bz#300151, #4)
+	* Use gmtime instead of localtime when generating rss
+	* Expose rpm_sourcerpm in repoview pkg_data dict (#3)
+	* Apply utf-8 patch from kkofler (#2)
+
+Version 0.6.1:
+	* Allow blank changelogs (bug #8)
+	* Fix traceback when group names have case differences (rh #300151)
+	* Add a --comps cmdline option to allow for external comps files
+	* Allow google-indexing of the index page, to make it easier to find
+	  mirrors.
+
+Version 0.6.0:
 	* Big rewrite that breaks all compatibility with previous versions, except
 	  for most command-line switches.
 	* Introduces state-tracking, so small changes to the respository will

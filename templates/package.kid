@@ -58,16 +58,19 @@ def ymd(stamp):
             <td valign="top"><a href="${'../%s' % loc}" class="inpage" 
               py:content="'%s-%s-%s.%s' % (pkg_data['name'], v, r, a)"/>
               [<span style="white-space: nowrap" py:content="size"/>]</td>
-            <td valign="top">
+            <td valign="top" py:if="log">
               <strong>Changelog</strong>
               by <span py:content="'%s (%s)' % (author, ymd(added))"/>:
               <pre style="margin: 0pt 0pt 5pt 5pt" py:content="log"/>
+            </td>
+            <td valign="top" py:if="not log">
+            	<em>(no changelog entry)</em>
             </td>
         </tr>
         </table>
         <p class="footernote">
           Listing created by
-          <a href="http://linux.duke.edu/projects/mini/repoview/"
+          <a href="https://fedorahosted.org/repoview/"
             class="repoview" py:content="'Repoview-%s' % repo_data['my_version']"/>
         </p>
     </div>

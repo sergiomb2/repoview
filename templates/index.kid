@@ -10,6 +10,7 @@ def ymd(stamp):
   <link rel="stylesheet" href="layout/repostyle.css" type="text/css" />
   <link py:if="url is not None"
 	  rel="alternate" type="application/rss+xml" title="RSS" href="latest-feed.xml" />
+  <meta name="robots" content="index,follow" />
 </head>
 <body>
     <div class="levbar">
@@ -43,7 +44,7 @@ def ymd(stamp):
         
         <p class="footernote">
           <span py:content="'Listing generated: %s by' % ymd(time.time())"/>
-          <a href="http://mricon.com/trac/wiki/Repoview"
+          <a href="https://fedorahosted.org/repoview/"
             class="repoview" py:content="'RepoView-%s' % repo_data['my_version']"/>
         </p>
     </div>
