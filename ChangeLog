@@ -1,3 +1,6 @@
+Version 0.6.5:
+	* Apply another patch from Remi Collet to fix rhbz#566789
+
 Version 0.6.4:
 	* Apply patch from Remi Collet for a change of behaviour in sqlite 
 	  (rhbz#498752, F11)
