@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.4'
+VERSION = '0.6.5'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
@@ -734,10 +734,11 @@ class Repoview:
         @rtype: list
         """
         self.say('Collecting latest packages...')
-        query = """SELECT DISTINCT name
+        query = """SELECT name
                      FROM packages 
                     WHERE %s
-                 ORDER BY time_build DESC LIMIT %s""" % (self.exclude, limit)
+                    GROUP BY name
+                 ORDER BY MAX(time_build) DESC LIMIT %s""" % (self.exclude, limit)
         pcursor = self.pconn.cursor()
         pcursor.execute(query)
         
