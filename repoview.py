@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.5'
+VERSION = '0.6.6'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
 
@@ -321,12 +321,12 @@ class Repoview:
         self.say('done\n')
         
         self.say('Opening primary database...')
-        primary = self.bz_handler(primary)
+        primary = self.z_handler(primary)
         self.pconn = sqlite.connect(primary)
         self.say('done\n')
         
         self.say('Opening changelogs database...')
-        other = self.bz_handler(other)
+        other = self.z_handler(other)
         self.oconn = sqlite.connect(other)
         self.say('done\n')
         
@@ -636,7 +636,7 @@ class Repoview:
             query = """DELETE FROM state WHERE filename='%s'""" % filename
             scursor.execute(query)
     
-    def bz_handler(self, dbfile):
+    def z_handler(self, dbfile):
         """
         If the database file is compressed, uncompresses it and returns the
         filename of the uncompressed file.
@@ -647,17 +647,25 @@ class Repoview:
         @return: the name of the uncompressed file
         @rtype:  str
         """
-        if dbfile[-4:] != '.bz2':
-            # Not compressed
+        (junk, ext) = os.path.splitext(dbfile)
+
+        if ext == '.bz2':
+            from bz2 import BZ2File
+            zfd = BZ2File(dbfile)
+        elif ext == '.gz':
+            from gzip import GzipFile
+            zfd = GzipFile(dbfile)
+        elif ext == '.xz':
+            from lzma import LZMAFile
+            zfd = LZMAFile(dbfile)
+        else:
+            # not compressed (or something odd)
             return dbfile
-        
+
         import tempfile
-        from bz2 import BZ2File
-        
         (unzfd, unzname) = tempfile.mkstemp('.repoview')
         self.cleanup.append(unzname)
-        
-        zfd = BZ2File(dbfile)
+
         unzfd = open(unzname, 'w')
         
         while True:
@@ -856,7 +864,7 @@ class Repoview:
             rss_kid.pkg_data = pkg_data
             description = rss_kid.serialize()
             etb.start('description')
-            etb.data(description)
+            etb.data(description.decode('utf-8'))
             etb.end('description')
             etb.end('item')
         
