@@ -1,3 +1,7 @@
+Version 0.6.6:
+	* Fix for .gz and .xz compressed sqlite databases (rhbz#749028)
+	* Apply Remi Collet's patch to fix encoding (rhbz#636601)
+
 Version 0.6.5:
 	* Apply another patch from Remi Collet to fix rhbz#566789
 
