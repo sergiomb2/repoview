@@ -1,6 +1,6 @@
 Name:           repoview
 Version:        0.6.6
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Creates a set of static HTML pages in a yum repository
 
 License:        GPLv2+
@@ -10,6 +10,7 @@ Source1:        fedora-repoview-templates.tar.gz
 BuildArch:      noarch
 
 Requires:       python2-kid >= 0.6.3, yum >= 3.0, python2 >= 2.5
+Requires:       python2-rpmUtils
 
 %description
 RepoView creates a set of static HTML pages in a yum repository for easy
@@ -26,7 +27,7 @@ sed -i -e \
 sed -i -e \
     "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
     repoview.py
-
+sed -i 's|#!/usr/bin/python|#!/usr/bin/python2|g' repoview.py
 
 %build
 
@@ -53,6 +54,11 @@ cp -rp fedora-repoview $RPM_BUILD_ROOT/%{_datadir}/%{name}/fedora
 
 
 %changelog
+* Sat Mar 14 2020 josef radinger <cheese@nosuchhost.net> - 0.6.6-15
+- rebuild for fedora 31
+- Require python2-rpmUtils
+- force python2
+
 * Sat Feb 02 2019 Fedora Release Engineering <releng@fedoraproject.org> - 0.6.6-14
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_30_Mass_Rebuild
 
