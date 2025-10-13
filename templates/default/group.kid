@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<html xmlns:py="http://purl.org/kid/ns#">
+<html xmlns:py="http://genshi.edgewall.org/">
 <head>
   <title py:content="'RepoView: %s' % repo_data['title']"/>
   <link rel="stylesheet" href="layout/repostyle.css" type="text/css" />

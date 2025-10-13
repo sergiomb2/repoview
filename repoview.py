@@ -1,4 +1,4 @@
-#!/usr/bin/python -tt
+#!/usr/bin/python3 -tt
 # -*- mode: Python; indent-tabs-mode: nil; -*-
 """
 Repoview is a small utility to generate static HTML pages for a repodata
@@ -41,9 +41,9 @@ import time
 import hashlib as md5
 
 from optparse import OptionParser
-from kid      import Template
+from genshi.template      import TemplateLoader
 
-from rpmUtils.miscutils import compareEVR
+#from rpmUtils.miscutils import compareEVR
 
 try:
     from xml.etree.cElementTree import fromstring, ElementTree, TreeBuilder
@@ -166,13 +166,12 @@ class Repoview:
                      'letters':    letters,
                      'my_version': VERSION
                     }
-        
-        group_kid = Template(file=os.path.join(opts.templatedir, GRPKID))
+        group_kid = TemplateLoader(opts.templatedir)
         group_kid.assume_encoding = "utf-8"
         group_kid.repo_data = repo_data
         self.group_kid = group_kid
         
-        pkg_kid = Template(file=os.path.join(opts.templatedir, PKGKID))
+        pkg_kid = TemplateLoader(opts.templatedir)
         pkg_kid.assume_encoding = "utf-8"
         pkg_kid.repo_data = repo_data
         self.pkg_kid = pkg_kid
@@ -205,7 +204,12 @@ class Repoview:
                 self.say('Writing group %s\n' % grp_filename)
                 self.group_kid.group_data = group_data
                 outfile = os.path.join(self.outdir, grp_filename)
-                self.group_kid.write(outfile, output='xhtml-strict')
+            
+                tmpl= self.group_kid.loader.load( GRPKID )
+
+                stream=tmpl.generate(group_data=group_data, repo_data=self.pkg_kid.repo_data)
+                with open( outfile, "w" ) as f:
+                   f.write( stream.render('xhtml', doctype='xhtml-strict'))
         
         latest = self.get_latest_packages()
         repo_data['latest'] = latest
@@ -216,14 +220,19 @@ class Repoview:
             # Write index.html and rss feed (if asked)
             self.say('Writing index.html...')
             idx_tpt = os.path.join(self.opts.templatedir, IDXKID)
-            idx_kid = Template(file=idx_tpt)
+            idx_kid = TemplateLoader(self.opts.templatedir)
             idx_kid.assume_encoding = "utf-8"
             idx_kid.repo_data = repo_data
             idx_kid.url = self.opts.url
             idx_kid.latest = latest
             idx_kid.groups = self.groups
             outfile = os.path.join(self.outdir, 'index.html')
-            idx_kid.write(outfile, output='xhtml-strict')
+            
+            tmpl= idx_kid.load( IDXKID  )
+
+            stream=tmpl.generate( repo_data = repo_data, url=self.opts.url, groups = self.groups, latest = latest )
+            with open( outfile, "w" ) as f:
+               f.write( stream.render('xhtml', doctype='xhtml-strict'))
             self.say('done\n')
             
             # rss feed
@@ -381,7 +390,7 @@ class Repoview:
             # clean slate -- remove everything
             shutil.rmtree(self.outdir)
         if not os.access(self.outdir, os.R_OK):
-            os.mkdir(self.outdir, 0755)
+            os.mkdir(self.outdir, 0o755)
             
         layoutsrc = os.path.join(self.opts.templatedir, 'layout')
         layoutdst = os.path.join(self.outdir, 'layout')
@@ -458,8 +467,10 @@ class Repoview:
                 temp[(row[1], row[2], row[3], row[4])] = row
             
             keys = temp.keys()
+            """
             keys.sort(_compare_evra)
             keys.reverse()
+            """
             versions = []
             for key in keys:
                 versions.append(temp[key])
@@ -556,7 +567,13 @@ class Repoview:
                 self.pkg_kid.group_data = group_data
                 self.pkg_kid.pkg_data = pkg_data
                 outfile = os.path.join(self.outdir, pkg_filename)
-                self.pkg_kid.write(outfile, output='xhtml-strict')
+                self.pkg_kid = TemplateLoader(self.opts.templatedir)
+            
+                tmpl= self.pkg_kid.load( PKGKID )
+
+                stream=tmpl.generate(group_data=group_data, pkg_data=pkg_data, repo_data=repo_data)
+                with open( outfile, "w" ) as f:
+                   f.write( stream.render('xhtml', doctype='xhtml-strict'))
                 self.written[pkgname] = pkg_tuple
             else:
                 self.written[pkgname] = pkg_tuple
@@ -579,11 +596,13 @@ class Repoview:
             # since dicts are non-deterministic, we get keys, then sort them,
             # and then create a list of values, which we then pickle.
             keys = data.keys()
+            """
             keys.sort()
+            """
             
             for key in keys:
                 mangle.append(data[key])
-        return md5.md5(str(mangle)).hexdigest()
+        return md5.md5((str(mangle)).encode()).hexdigest()
     
     def has_changed(self, filename, checksum):
         """
@@ -666,7 +685,7 @@ class Repoview:
         (unzfd, unzname) = tempfile.mkstemp('.repoview')
         self.cleanup.append(unzname)
 
-        unzfd = open(unzname, 'w')
+        unzfd = open(unzname, 'wb')
         
         while True:
             data = zfd.read(16384)
@@ -938,3 +957,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+#!/usr/bin/python3 -tt

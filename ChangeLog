@@ -1,3 +1,5 @@
+Version 0.7.0:
+        * Fix for python3 uing genshi
 Version 0.6.6:
 	* Fix for .gz and .xz compressed sqlite databases (rhbz#749028)
 	* Apply Remi Collet's patch to fix encoding (rhbz#636601)

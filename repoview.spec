@@ -1,6 +1,6 @@
 Name:           repoview
-Version:        0.6.7
-Release:        1%{?dist}
+Version:        0.7.0
+Release:        8%{?dist}
 Summary:        Creates a set of static HTML pages in a yum repository
 
 License:        GPLv2+
@@ -8,8 +8,7 @@ URL:            https://github.com/sergiomb2/repoview
 Source0:        https://github.com/sergiomb2/repoview/archive/v%{version}/%{name}-%{version}.tar.gz
 BuildArch:      noarch
 
-Requires:       python2-kid >= 0.6.3, yum >= 3.0, python2 >= 2.5
-Requires:       python2-rpmUtils
+Requires:       python-genshi >= 0.6.3, dnf >= 3.0, python >= 3.5
 
 %description
 RepoView creates a set of static HTML pages in a yum repository for easy
@@ -26,13 +25,12 @@ sed -i -e \
 sed -i -e \
     "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
     repoview.py
-sed -i 's|#!/usr/bin/python|#!/usr/bin/python2|g' repoview.py
+
 
 %build
 
 
 %install
-rm -rf $RPM_BUILD_ROOT
 mkdir -p -m 755                         \
     $RPM_BUILD_ROOT/%{_datadir}/%{name} \
     $RPM_BUILD_ROOT/%{_bindir}          \
@@ -50,6 +48,15 @@ cp -rp templates               $RPM_BUILD_ROOT/%{_datadir}/%{name}/
 
 
 %changelog
+* Mon Oct 13 2025 Sérgio Basto <sergio@serjux.com> - 0.7.0-8
+- Python 3 alpha version
+
+* Fri Oct 3 2025 Stephen Collier <stephenbcollier@gmail.com> - 0.7.0-7
+- fix some typos
+
+* Thu Oct 2 2025 Stephen Collier <stephenbcollier@gmail.com> - 0.7.0
+- Rebuilt for python3
+
 * Sun May 16 2021 Sérgio Basto <sergio@serjux.com> - 0.6.7-1
 - Update to 0.6.7
 

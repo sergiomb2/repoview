@@ -5,9 +5,9 @@ format that's easily browsable via http by creating a set of static HTML pages.
 
 REQUIREMENTS:
 -------------
-* Kid templating engine (0.6.3 or above)
+* Genshi templating engine (0.6.3 or above)
 * Yum 3.0 or above
-* Python-2.5 or Python-2.4 with cElementTree
+* Python-3 with cElementTree
 * Sqlite-3
 
 AUTHORS:
