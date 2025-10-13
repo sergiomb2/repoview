@@ -70,7 +70,7 @@ ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
 VERSION = '0.6.6'
 SUPPORTED_DB_VERSION = 10
-DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates'
+DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates/default'
 
 def _mkid(text):
     """
@@ -205,9 +205,9 @@ class Repoview:
                 self.group_kid.group_data = group_data
                 outfile = os.path.join(self.outdir, grp_filename)
             
-                tmpl= self.group_kid.loader.load( GRPKID )
+                tmpl= self.group_kid.load( GRPKID )
 
-                stream=tmpl.generate(group_data=group_data, repo_data=self.pkg_kid.repo_data)
+                stream=tmpl.generate(group_data=group_data, repo_data=repo_data)
                 with open( outfile, "w" ) as f:
                    f.write( stream.render('xhtml', doctype='xhtml-strict'))
         
