@@ -1,6 +1,6 @@
 Name:           repoview
 Version:        0.7.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Creates a set of static HTML pages in a yum repository
 
 License:        GPLv2+
@@ -11,20 +11,12 @@ BuildArch:      noarch
 Requires:       python-genshi >= 0.6.3, dnf >= 3.0, python >= 3.5
 
 %description
-RepoView creates a set of static HTML pages in a yum repository for easy
+RepoView creates a set of static HTML pages in a yum/dnf repository for easy
 browsing.
 
 
 %prep
 %setup -q
-##
-# Fix version and default templates dir.
-#
-sed -i -e \
-    "s|^VERSION =.*|VERSION = '%{version}-%{release}'|g" repoview.py
-sed -i -e \
-    "s|^DEFAULT_TEMPLATEDIR =.*|DEFAULT_TEMPLATEDIR = '%{_datadir}/%{name}/templates'|g" \
-    repoview.py
 
 
 %build
@@ -48,6 +40,9 @@ cp -rp templates               $RPM_BUILD_ROOT/%{_datadir}/%{name}/
 
 
 %changelog
+* Mon Oct 13 2025 Sérgio Basto <sergio@serjux.com> - 0.7.0-9
+- Python 3 beta version
+
 * Mon Oct 13 2025 Sérgio Basto <sergio@serjux.com> - 0.7.0-8
 - Python 3 alpha version
 
