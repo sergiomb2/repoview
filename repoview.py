@@ -6,7 +6,7 @@ directory, to make it easily browseable.
 
 @author:    Konstantin Ryabitsev & contributors
 @copyright: 2005 by Duke University, 2006-2007 by Konstantin Ryabitsev & co
-@license:   GPL
+@license:   GPLv2
 """
 ##
 # This program is free software; you can redistribute it and/or modify
@@ -39,11 +39,11 @@ import shutil
 import sys
 import time
 import hashlib as md5
+import functools
+import rpm
 
 from optparse import OptionParser
 from genshi.template      import TemplateLoader
-
-#from rpmUtils.miscutils import compareEVR
 
 try:
     from xml.etree.cElementTree import fromstring, ElementTree, TreeBuilder
@@ -68,7 +68,7 @@ RSSKID    = 'rss.kid'
 RSSFILE   = 'latest-feed.xml'
 ISOFORMAT = '%a, %d %b %Y %H:%M:%S %z'
 
-VERSION = '0.6.6'
+VERSION = '0.7.0'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates/default'
 
@@ -117,8 +117,11 @@ def _compare_evra(one, two):
     @return: -1, 0, 1
     @rtype:  int
     """
-    return compareEVR(one[:3], two[:3])
-    
+    # Use only (epoch, version, release) and convert epoch to string
+    evr_one = (str(one[0]), one[1], one[2])
+    evr_two = (str(two[0]), two[1], two[2])
+
+    return rpm.labelCompare(evr_one, evr_two)
 
 class Repoview:
     """
@@ -386,15 +389,18 @@ class Repoview:
         
         @rtype: void
         """
-        if self.opts.force and os.access(self.outdir, os.R_OK):
-            # clean slate -- remove everything
+        # Remove the directory if 'force' option is active
+        if self.opts.force and os.path.exists(self.outdir):
             shutil.rmtree(self.outdir)
-        if not os.access(self.outdir, os.R_OK):
-            os.mkdir(self.outdir, 0o755)
             
+        # Create the output directory and ensure 755 permissions
+        os.makedirs(self.outdir, exist_ok=True)
+        os.chmod(self.outdir, 0o755)
+
+        # Copy the layout from template if it exists and destination does not exist
         layoutsrc = os.path.join(self.opts.templatedir, 'layout')
         layoutdst = os.path.join(self.outdir, 'layout')
-        if os.path.isdir(layoutsrc) and not os.access(layoutdst, os.R_OK):
+        if os.path.isdir(layoutsrc) and not os.path.exists(layoutdst):
             self.say('Copying layout...')
             shutil.copytree(layoutsrc, layoutdst)
             self.say('done\n')
@@ -466,14 +472,10 @@ class Repoview:
             for row in rows:
                 temp[(row[1], row[2], row[3], row[4])] = row
             
-            keys = temp.keys()
-            """
-            keys.sort(_compare_evra)
-            keys.reverse()
-            """
-            versions = []
-            for key in keys:
-                versions.append(temp[key])
+            keys = list(temp.keys())
+            # Use cmp_to_key to adapt _compare_evra
+            keys.sort(key=functools.cmp_to_key(_compare_evra), reverse=True)
+            versions = [temp[key] for key in keys]
         
         pkg_filename = _mkid(PKGFILE % pkgname)
         
@@ -595,10 +597,8 @@ class Repoview:
         for data in args:
             # since dicts are non-deterministic, we get keys, then sort them,
             # and then create a list of values, which we then pickle.
-            keys = data.keys()
-            """
+            keys = list(data.keys())
             keys.sort()
-            """
             
             for key in keys:
                 mangle.append(data[key])
