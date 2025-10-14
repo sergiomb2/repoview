@@ -45,7 +45,7 @@ def ymd(stamp):
       <div id="footer">
         <p>
           <span py:content="'Listing generated: %s by' % ymd(time.time())"/>
-          <a href="http://mricon.com/trac/wiki/Repoview"
+          <a href="https://github.com/sergiomb2/repoview"
             class="repoview" py:content="'RepoView-%s' % repo_data['my_version']"/>
         </p>
        
