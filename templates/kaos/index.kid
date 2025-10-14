@@ -4,7 +4,7 @@ import time
 def ymd(stamp):
     return time.strftime('%d/%m/%Y', time.localtime(int(stamp)))
 ?>
-<html xmlns:py="http://purl.org/kid/ns#">
+<html xmlns:py="http://genshi.edgewall.org/">
 <head>
   <title py:content="'RepoView KAOS: %s' % repo_data['title']"/>
   <link rel="stylesheet" href="layout/repostyle.css" type="text/css" />

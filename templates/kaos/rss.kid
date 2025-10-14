@@ -4,7 +4,7 @@ import time
 def ymd(stamp):
     return time.strftime('%d/%m/%Y', time.localtime(int(stamp)))
 ?>
-<div xmlns:py="http://purl.org/kid/ns#">
+<div xmlns:py="http://genshi.edgewall.org/">
   <p>
     <strong>Package:</strong> <span py:replace="pkg_data['name']"/><br/>
     <strong>Summary:</strong> <span py:replace="pkg_data['summary']"/>
