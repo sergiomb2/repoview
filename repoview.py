@@ -706,18 +706,21 @@ class Repoview:
 
         @rtype: void
         """
-        from yum.comps import Comps
+        import libcomps
 
         self.say('Parsing comps.xml...')
-        comps = Comps()
-        comps.add(compsxml)
+        comps = libcomps.Comps()
+        comps.fromxml_f(compsxml)
 
         for group in comps.groups:
-            if not group.user_visible or not group.packages:
-                continue
-            group_filename = _mkid(GRPFILE % group.groupid)
-            self.groups.append([group.name, group_filename, group.description,
-                                group.packages])
+            #if not group.uservisible:
+                #continue
+            if not group.packages:
+               continue
+
+            group_filename = _mkid(GRPFILE % group.id)
+            pkg_names = [pkg.name for pkg in group.packages]
+            self.groups.append([ group.name, group_filename, group.desc, pkg_names ])
         self.say('done\n')
 
     def setup_rpm_groups(self):

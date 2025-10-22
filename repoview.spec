@@ -8,7 +8,9 @@ URL:            https://github.com/sergiomb2/repoview
 Source0:        https://github.com/sergiomb2/repoview/archive/v%{version}/%{name}-%{version}.tar.gz
 BuildArch:      noarch
 
-Requires:       python-genshi >= 0.6.3, dnf >= 3.0, python >= 3.5
+Requires:       python >= 3.5
+Requires:       python-genshi >= 0.6.3
+Requires:       python-libcomps
 
 %description
 RepoView creates a set of static HTML pages in a yum/dnf repository for easy
