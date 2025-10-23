@@ -1,6 +1,6 @@
 Name:           repoview
-Version:        0.7.0
-Release:        9%{?dist}
+Version:        0.7.1
+Release:        1%{?dist}
 Summary:        Creates a set of static HTML pages in a yum repository
 
 License:        GPLv2+
@@ -42,6 +42,9 @@ cp -rp templates               $RPM_BUILD_ROOT/%{_datadir}/%{name}/
 
 
 %changelog
+* Thu Oct 23 2025 Sérgio Basto <sergio@serjux.com> - 0.7.1-1
+- Update to 0.7.1
+
 * Mon Oct 13 2025 Sérgio Basto <sergio@serjux.com> - 0.7.0-9
 - Python 3 beta version
 
