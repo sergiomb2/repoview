@@ -72,6 +72,13 @@ VERSION = '0.7.1'
 SUPPORTED_DB_VERSION = 10
 DEFAULT_TEMPLATEDIR = '/usr/share/repoview/templates/default'
 
+# High-level execution pipeline (mirrored by the inline "Phase" comments below):
+#   1. Parse CLI arguments (main) and instantiate Repoview.
+#   2. Locate repository assets, prepare output/state directories, build exclusion SQL.
+#   3. Build group definitions (comps, RPM groups, letter groups) and render package pages.
+#   4. Render aggregate views (group pages, index, optional RSS).
+#   5. Persist incremental state and delete artifacts from previous runs.
+
 def _mkid(text):
     """
     Make a web-friendly filename out of group names and package names.
@@ -107,7 +114,9 @@ def _humansize(bytes):
 
 def _compare_evra(one, two):
     """
-    Just a quickie sorting helper. Yes, I'm avoiding using lambdas.
+    Comparison helper for sorting packages by EVR (Epoch, Version, Release).
+    
+    It adapts the tuple format for use with rpm.labelCompare.
 
     @param one: tuple of (e,v,r,a)
     @type  one: tuple
@@ -125,7 +134,14 @@ def _compare_evra(one, two):
 
 class Repoview:
     """
-    The working horse class.
+    The main controller class for Repoview.
+    
+    This class handles the entire workflow:
+    1. initializing repository connections and state database,
+    2. processing groups and packages,
+    3. managing incremental builds via checksums,
+    4. rendering templates using Genshi,
+    5. and generating the final HTML output and RSS feeds.
     """
 
     def __del__(self):
@@ -138,14 +154,26 @@ class Repoview:
         @param opts: OptionParser's opts
         @type  opts: OptionParser
         """
+        # The constructor orchestrates the full build pipeline up front so that
+        # later helper methods can assume all shared state (database handles,
+        # exclusion SQL, template loaders, etc.) already exists.
+        # The initialization order below mirrors the chronological order of a
+        # repoview run: collect inputs → prepare filesystem → prepare state →
+        # compute grouping metadata → render pages → persist state.
         # list of files to remove at the end of processing
         self.cleanup = []
         self.opts    = opts
-        self.outdir  = os.path.join(opts.repodir, 'repoview')
+        # Honor the CLI-provided output directory name (defaults to "repoview")
+        # but always treat it as a subdirectory of the repository root.
+        self.outdir  = os.path.join(opts.repodir, opts.outdir)
 
         self.exclude    = '1=1'
-        self.state_data = {} #?
-        self.written    = {} #?
+        # Dictionary storing filename -> checksum mapping from the state database (previous run).
+        # Used to determine if a file needs to be regenerated.
+        self.state_data = {} 
+        # Dictionary tracking packages processed in the current run to handle duplicates
+        # and avoid re-processing. Maps pkgname -> pkg_tuple.
+        self.written    = {} 
 
         self.groups        = []
         self.letter_groups = []
@@ -154,7 +182,9 @@ class Repoview:
         self.oconn = None # other.sqlite
         self.sconn = None # state db
 
+        # Phase 1: locate repository metadata, initialize database handles.
         self.setup_repo()
+        # Phase 2: prepare filesystem targets and incremental build state.
         self.setup_outdir()
         self.setup_state_db()
         self.setup_excludes()
@@ -169,6 +199,9 @@ class Repoview:
                      'letters':    letters,
                      'my_version': VERSION
                     }
+        # Template engine handles page rendering.  Each TemplateLoader instance can cache
+        # compiled templates, so we keep dedicated loaders for packages and groups to
+        # avoid cross-assignment of contextual attributes.
         group_kid = TemplateLoader(opts.templatedir)
         self.group_kid = group_kid
 
@@ -176,6 +209,10 @@ class Repoview:
         self.pkg_kid = pkg_kid
 
         count = 0
+        # Phase 3: Iterate through all logical groups (explicit comps groups plus
+        # auto-generated alphabetical "Letter" buckets).  Each iteration renders
+        # the packages belonging to the group, wires them into group metadata, and
+        # produces the HTML if any of the constituent checksums changed.
         for group_data in self.groups + self.letter_groups:
             (grp_name, grp_filename, grp_description, pkgnames) = group_data
             pkgnames.sort()
@@ -186,6 +223,9 @@ class Repoview:
                           'filename':    grp_filename,
                           }
 
+            # Package pages double as a cache warm-up for group pages: the call returns
+            # summary tuples used on the group listing while also writing/refining the
+            # individual package HTML files.
             packages = self.do_packages(repo_data, group_data, pkgnames)
 
             if not packages:
@@ -210,6 +250,7 @@ class Repoview:
                 with open( outfile, "w" ) as f:
                    f.write( stream.render('xhtml', doctype='xhtml-strict'))
 
+        # Phase 4: Build aggregated views (latest packages list, index page, optional RSS).
         latest = self.get_latest_packages()
         repo_data['latest'] = latest
         repo_data['groups'] = self.groups
@@ -236,19 +277,25 @@ class Repoview:
             if self.opts.url:
                 self.do_rss(repo_data, latest)
 
+        # Phase 5: Delete orphaned files and persist state so the next run can stay incremental.
         self.remove_stale()
         self.sconn.commit()
 
     def setup_state_db(self):
         """
-        Sets up the state-tracking database.
+        Initializes the SQLite database used for incremental build state tracking.
+        
+        The database stores checksums of previously generated files to avoid 
+        unnecessary writes. If a specific state directory is not provided, 
+        it creates 'state.sqlite' in the output directory.
 
         @rtype: void
         """
         self.say('Examining state db...')
         if self.opts.statedir:
             # we'll use the md5sum of the repo location to make it unique
-            unique = '%s.state.sqlite' % hashlib.md5(self.outdir).hexdigest()
+            # among multiple repositories sharing the same statedir.
+            unique = '%s.state.sqlite' % hashlib.md5(self.outdir.encode()).hexdigest()
             statedb = os.path.join(self.opts.statedir, unique)
         else:
             statedb = os.path.join(self.outdir, 'state.sqlite')
@@ -281,8 +328,11 @@ class Repoview:
 
     def setup_repo(self):
         """
-        Examines the repository, makes sure that it's valid and supported,
-        and then opens the necessary databases.
+        Validates the repository structure and initializes database connections.
+        
+        It parses 'repodata/repomd.xml' to locate the 'primary' (packages) and 
+        'other' (changelogs) SQLite databases, as well as the 'group' (comps) file.
+        It also checks for schema version compatibility.
 
         @rtype: void
         """
@@ -356,8 +406,8 @@ class Repoview:
 
     def setup_excludes(self):
         """
-        Formulates an SQL exclusion rule that we use throughout in order
-        to respect the ignores passed on the command line.
+        Constructs the 'self.exclude' SQL clause to filter packages based on 
+        command-line ignore patterns and architecture exclusions.
 
         @rtype: void
         """
@@ -379,7 +429,10 @@ class Repoview:
 
     def setup_outdir(self):
         """
-        Sets up the output directory.
+        Prepares the output directory for generating the static site.
+        
+        It handles cleaning up if force mode is active, ensures correct permissions (755),
+        and copies static layout assets (CSS, images) from the template directory.
 
         @rtype: void
         """
@@ -401,9 +454,12 @@ class Repoview:
 
     def get_package_data(self, pkgname):
         """
-        Queries the packages and changelog databases and returns package data
-        in a dict:
+        Queries the packages and changelog databases to construct a detailed package record.
+        
+        It aggregates all available versions/architectures of the package into a single
+        dictionary structure.
 
+        Returns a dictionary with the following structure:
         pkg_data = {
                     'name':          str,
                     'filename':      str,
@@ -413,19 +469,18 @@ class Repoview:
                     'rpm_license':   str,
                     'rpm_sourcerpm': str,
                     'vendor':        str,
-                    'rpms':          []
+                    'rpms':          [] # List of version tuples
                     }
 
-        the "rpms" key is a list of tuples with the following members:
+        The "rpms" key list contains tuples:
             (epoch, version, release, arch, time_build, size, location_href,
              author, changelog, time_added)
-
 
         @param pkgname: the name of the package to look up
         @type  pkgname: str
 
-        @return: a REALLY hairy dict of values
-        @rtype:  list
+        @return: A dictionary containing the package details and version history.
+        @rtype:  dict
         """
         # fetch versions
         query = """SELECT pkgKey,
@@ -485,6 +540,9 @@ class Repoview:
                     'rpms':          []
                     }
 
+        # Build a human-readable payload for the template system.  The first row
+        # encountered becomes the canonical metadata, while every row contributes
+        # an RPM tuple (epoch, version, release, arch, etc.) for the download table.
         for row in versions:
             (pkg_key, epoch, version, release, arch, summary,
              description, url, time_build, rpm_license, rpm_sourcerpm,
@@ -538,7 +596,9 @@ class Repoview:
                  (pkg_name, pkg_filename, pkg_summary)
         @rtype:  list
         """
-        # this is what we return for the group object
+        # Each group page needs a compact listing with (name, filename, summary).
+        # pkg_tuples doubles as that listing and as an in-memory cache so we do
+        # not re-render the same package when it appears in multiple groups.
         pkg_tuples = []
 
         for pkgname in pkgnames:
@@ -578,13 +638,15 @@ class Repoview:
 
     def mk_checksum(self, *args):
         """
-        A fairly dirty function used for state tracking. This is how we know
-        if the contents of the page have changed or not.
+        Calculates a deterministic MD5 checksum for the provided data dictionaries.
+        
+        This checksum is used for state tracking to detect if the content of a page
+        would change based on the data. It sorts dictionary keys to ensure consistency
+        before hashing.
 
-        @param *args: dicts
-        @rtype *args: dicts
-
-        @return: an md5 checksum of the dicts passed
+        @param *args: One or more dictionaries containing data to be hashed.
+        
+        @return: An MD5 checksum string of the serialized data.
         @rtype:  str
         """
         mangle = []
@@ -719,7 +781,8 @@ class Repoview:
 
     def setup_rpm_groups(self):
         """
-        When comps is not around, we use the (useless) RPM groups.
+        Fallback method to group packages using their RPM 'Group' tag 
+        when a valid comps.xml is not available.
 
         @rtype: void
         """
