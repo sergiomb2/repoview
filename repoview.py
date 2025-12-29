@@ -1,4 +1,4 @@
-#!/usr/bin/python3 -tt
+#!/usr/bin/env python3
 # -*- mode: Python; indent-tabs-mode: nil; -*-
 """
 Repoview is a small utility to generate static HTML pages for a repodata
@@ -38,12 +38,12 @@ import os
 import shutil
 import sys
 import time
-import hashlib as md5
+import hashlib
 import functools
 import rpm
 
 from optparse import OptionParser
-from genshi.template      import TemplateLoader
+from genshi.template import TemplateLoader, MarkupTemplate as Template
 
 try:
     from xml.etree.cElementTree import fromstring, ElementTree, TreeBuilder
@@ -99,8 +99,8 @@ def _humansize(bytes):
     if bytes < 1024:
         return '%d Bytes' % bytes
     bytes = int(bytes)
-    kbytes = bytes/1024
-    if kbytes/1024 < 1:
+    kbytes = bytes // 1024
+    if kbytes // 1024 < 1:
         return '%d KiB' % kbytes
     else:
         return '%0.1f MiB' % (float(kbytes)/1024)
@@ -170,13 +170,9 @@ class Repoview:
                      'my_version': VERSION
                     }
         group_kid = TemplateLoader(opts.templatedir)
-        group_kid.assume_encoding = "utf-8"
-        group_kid.repo_data = repo_data
         self.group_kid = group_kid
 
         pkg_kid = TemplateLoader(opts.templatedir)
-        pkg_kid.assume_encoding = "utf-8"
-        pkg_kid.repo_data = repo_data
         self.pkg_kid = pkg_kid
 
         count = 0
@@ -224,8 +220,6 @@ class Repoview:
             self.say('Writing index.html...')
             idx_tpt = os.path.join(self.opts.templatedir, IDXKID)
             idx_kid = TemplateLoader(self.opts.templatedir)
-            idx_kid.assume_encoding = "utf-8"
-            idx_kid.repo_data = repo_data
             idx_kid.url = self.opts.url
             idx_kid.latest = latest
             idx_kid.groups = self.groups
@@ -254,7 +248,7 @@ class Repoview:
         self.say('Examining state db...')
         if self.opts.statedir:
             # we'll use the md5sum of the repo location to make it unique
-            unique = '%s.state.sqlite' % md5.md5(self.outdir).hexdigest()
+            unique = '%s.state.sqlite' % hashlib.md5(self.outdir).hexdigest()
             statedb = os.path.join(self.opts.statedir, unique)
         else:
             statedb = os.path.join(self.outdir, 'state.sqlite')
@@ -550,7 +544,7 @@ class Repoview:
         for pkgname in pkgnames:
             pkg_filename = _mkid(PKGFILE % pkgname)
 
-            if pkgname in self.written.keys():
+            if pkgname in self.written:
                 pkg_tuples.append(self.written[pkgname])
                 continue
 
@@ -602,7 +596,7 @@ class Repoview:
 
             for key in keys:
                 mangle.append(data[key])
-        return md5.md5((str(mangle)).encode()).hexdigest()
+        return hashlib.md5((str(mangle)).encode()).hexdigest()
 
     def has_changed(self, filename, checksum):
         """
@@ -619,7 +613,7 @@ class Repoview:
         """
         # calculate checksum
         scursor = self.sconn.cursor()
-        if filename not in self.state_data.keys():
+        if filename not in self.state_data:
             # totally new entry
             query = '''INSERT INTO state (filename, checksum)
                                   VALUES ('%s', '%s')''' % (filename, checksum)
@@ -647,7 +641,7 @@ class Repoview:
         @rtype void
         """
         scursor = self.sconn.cursor()
-        for filename in self.state_data.keys():
+        for filename in self.state_data:
             self.say('Removing stale file %s\n' % filename)
             fullpath = os.path.join(self.outdir, filename)
             if os.access(fullpath, os.W_OK):
@@ -839,54 +833,48 @@ class Repoview:
         etb = TreeBuilder()
         out = os.path.join(self.outdir, RSSFILE)
         etb.start('rss', {'version': '2.0'})
-        etb.start('channel')
-        etb.start('title')
+        etb.start('channel', {})
+        etb.start('title', {})
         etb.data(repo_data['title'])
         etb.end('title')
-        etb.start('link')
+        etb.start('link', {})
         etb.data('%s/repoview/%s' % (self.opts.url, RSSFILE))
         etb.end('link')
-        etb.start('description')
+        etb.start('description', {})
         etb.data('Latest packages for %s' % repo_data['title'])
         etb.end('description')
-        etb.start('lastBuildDate')
+        etb.start('lastBuildDate', {})
         etb.data(time.strftime(ISOFORMAT))
         etb.end('lastBuildDate')
-        etb.start('generator')
+        etb.start('generator', {})
         etb.data('Repoview-%s' % repo_data['my_version'])
         etb.end('generator')
 
-        rss_tpt = os.path.join(self.opts.templatedir, RSSKID)
-        rss_kid = Template(file=rss_tpt)
-        rss_kid.assume_encoding = "utf-8"
-        rss_kid.repo_data = repo_data
-        rss_kid.url = self.opts.url
-
+        rss_kid = self.pkg_kid.load(RSSKID)
         for row in latest:
             pkg_data = self.get_package_data(row[0])
 
             rpm = pkg_data['rpms'][0]
             (epoch, version, release, arch, built) = rpm[:5]
-            etb.start('item')
-            etb.start('guid')
+            etb.start('item', {})
+            etb.start('guid', {})
             etb.data('%s/repoview/%s+%s:%s-%s.%s' % (self.opts.url,
                                                      pkg_data['filename'],
                                                      epoch, version, release,
                                                      arch))
             etb.end('guid')
-            etb.start('link')
+            etb.start('link', {})
             etb.data('%s/repoview/%s' % (self.opts.url, pkg_data['filename']))
             etb.end('link')
-            etb.start('pubDate')
+            etb.start('pubDate', {})
             etb.data(time.strftime(ISOFORMAT, time.gmtime(int(built))))
             etb.end('pubDate')
-            etb.start('title')
+            etb.start('title', {})
             etb.data('Update: %s-%s-%s' % (pkg_data['name'], version, release))
             etb.end('title')
-            rss_kid.pkg_data = pkg_data
-            description = rss_kid.serialize()
-            etb.start('description')
-            etb.data(description.decode('utf-8'))
+            description = rss_kid.generate(pkg_data=pkg_data, repo_data=repo_data, url=self.opts.url).render()
+            etb.start('description', {})
+            etb.data(description)
             etb.end('description')
             etb.end('item')
 
@@ -960,4 +948,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-#!/usr/bin/python3 -tt
