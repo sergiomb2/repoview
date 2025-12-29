@@ -30,7 +30,6 @@ directory, to make it easily browseable.
 # Copyright (C) 2007 by Konstantin Ryabitsev and contributors
 # Author: Konstantin Ryabitsev <icon@fedoraproject.org>
 #
-#pylint: disable-msg=F0401,W0704
 
 __revision__ = '$Id$'
 
@@ -40,20 +39,32 @@ import sys
 import time
 import hashlib
 import functools
-import rpm
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+from bz2 import BZ2File
+from gzip import GzipFile
+from lzma import LZMAFile
+from tempfile import mkstemp
+
+try:
+    import rpm  # type: ignore[import]
+except ImportError as exc:
+    raise ImportError('Repoview requires the "rpm" Python bindings.') from exc
 
 from optparse import OptionParser
-from genshi.template import TemplateLoader, MarkupTemplate as Template
 
 try:
-    from xml.etree.cElementTree import fromstring, ElementTree, TreeBuilder
-except ImportError:
-    from cElementTree import fromstring, ElementTree, TreeBuilder
+    from genshi.template import TemplateLoader  # type: ignore[import]
+except ImportError as exc:
+    raise ImportError('Repoview requires the "genshi" package.') from exc
+
+from xml.etree.ElementTree import fromstring, ElementTree, TreeBuilder
+
+import sqlite3 as sqlite
 
 try:
-    import sqlite3 as sqlite
+    import libcomps  # type: ignore[import]
 except ImportError:
-    import sqlite
+    libcomps = None  # type: ignore[assignment]
 
 ##
 # Some hardcoded constants
@@ -93,7 +104,7 @@ def _mkid(text):
     text = text.replace(' ', '_')
     return text
 
-def _humansize(bytes):
+def _humansize(num_bytes):
     """
     This will return the size in sane units (KiB or MiB).
 
@@ -103,14 +114,13 @@ def _humansize(bytes):
     @return: human-readable string
     @rtype:  str
     """
-    if bytes < 1024:
-        return '%d Bytes' % bytes
-    bytes = int(bytes)
-    kbytes = bytes // 1024
+    if num_bytes < 1024:
+        return f'{num_bytes:d} Bytes'
+    num_bytes = int(num_bytes)
+    kbytes = num_bytes // 1024
     if kbytes // 1024 < 1:
-        return '%d KiB' % kbytes
-    else:
-        return '%0.1f MiB' % (float(kbytes)/1024)
+        return f'{kbytes:d} KiB'
+    return f'{float(kbytes)/1024:0.1f} MiB'
 
 def _compare_evra(one, two):
     """
@@ -161,7 +171,7 @@ class Repoview:
         # repoview run: collect inputs → prepare filesystem → prepare state →
         # compute grouping metadata → render pages → persist state.
         # list of files to remove at the end of processing
-        self.cleanup = []
+        self.cleanup: List[str] = []
         self.opts    = opts
         # Honor the CLI-provided output directory name (defaults to "repoview")
         # but always treat it as a subdirectory of the repository root.
@@ -170,17 +180,17 @@ class Repoview:
         self.exclude    = '1=1'
         # Dictionary storing filename -> checksum mapping from the state database (previous run).
         # Used to determine if a file needs to be regenerated.
-        self.state_data = {} 
+        self.state_data: Dict[str, str] = {}
         # Dictionary tracking packages processed in the current run to handle duplicates
         # and avoid re-processing. Maps pkgname -> pkg_tuple.
-        self.written    = {} 
+        self.written: Dict[str, Tuple[str, str, Optional[str]]] = {}
 
-        self.groups        = []
-        self.letter_groups = []
+        self.groups: List[Sequence[Any]] = []
+        self.letter_groups: List[Sequence[Any]] = []
 
-        self.pconn = None # primary.sqlite
-        self.oconn = None # other.sqlite
-        self.sconn = None # state db
+        self.pconn: Optional[sqlite.Connection] = None # primary.sqlite
+        self.oconn: Optional[sqlite.Connection] = None # other.sqlite
+        self.sconn: Optional[sqlite.Connection] = None # state db
 
         # Phase 1: locate repository metadata, initialize database handles.
         self.setup_repo()
@@ -240,15 +250,15 @@ class Repoview:
             checksum = self.mk_checksum(repo_data, group_data)
             if self.has_changed(grp_filename, checksum):
                 # write group file
-                self.say('Writing group %s\n' % grp_filename)
+                self.say(f'Writing group {grp_filename}\n')
                 self.group_kid.group_data = group_data
                 outfile = os.path.join(self.outdir, grp_filename)
 
-                tmpl= self.group_kid.load( GRPKID )
+                tmpl = self.group_kid.load(GRPKID)
 
-                stream=tmpl.generate(group_data=group_data, repo_data=repo_data)
-                with open( outfile, "w" ) as f:
-                   f.write( stream.render('xhtml', doctype='xhtml-strict'))
+                stream = tmpl.generate(group_data=group_data, repo_data=repo_data)
+                with open(outfile, "w", encoding="utf-8") as handle:
+                    handle.write(stream.render('xhtml', doctype='xhtml-strict'))
 
         # Phase 4: Build aggregated views (latest packages list, index page, optional RSS).
         latest = self.get_latest_packages()
@@ -259,18 +269,22 @@ class Repoview:
         if self.has_changed('index.html', checksum):
             # Write index.html and rss feed (if asked)
             self.say('Writing index.html...')
-            idx_tpt = os.path.join(self.opts.templatedir, IDXKID)
             idx_kid = TemplateLoader(self.opts.templatedir)
             idx_kid.url = self.opts.url
             idx_kid.latest = latest
             idx_kid.groups = self.groups
             outfile = os.path.join(self.outdir, 'index.html')
 
-            tmpl= idx_kid.load( IDXKID  )
+            tmpl = idx_kid.load(IDXKID)
 
-            stream=tmpl.generate( repo_data = repo_data, url=self.opts.url, groups = self.groups, latest = latest )
-            with open( outfile, "w" ) as f:
-               f.write( stream.render('xhtml', doctype='xhtml-strict'))
+            stream = tmpl.generate(
+                repo_data=repo_data,
+                url=self.opts.url,
+                groups=self.groups,
+                latest=latest,
+            )
+            with open(outfile, "w", encoding="utf-8") as handle:
+                handle.write(stream.render('xhtml', doctype='xhtml-strict'))
             self.say('done\n')
 
             # rss feed
@@ -279,7 +293,24 @@ class Repoview:
 
         # Phase 5: Delete orphaned files and persist state so the next run can stay incremental.
         self.remove_stale()
-        self.sconn.commit()
+        self._ensure_connection(self.sconn, 'state').commit()
+
+    def _ensure_connection(
+        self, conn: Optional[sqlite.Connection], label: str
+    ) -> sqlite.Connection:
+        """
+        Raise a helpful error if a SQLite connection has not been initialized yet.
+        """
+        if conn is None:
+            msg = f'{label} database connection is not initialized.'
+            raise RuntimeError(msg)
+        return conn
+
+    def _cursor(self, conn: Optional[sqlite.Connection], label: str) -> sqlite.Cursor:
+        """
+        Convenience helper for retrieving a cursor from a (possibly optional) connection.
+        """
+        return self._ensure_connection(conn, label).cursor()
 
     def setup_state_db(self):
         """
@@ -295,7 +326,7 @@ class Repoview:
         if self.opts.statedir:
             # we'll use the md5sum of the repo location to make it unique
             # among multiple repositories sharing the same statedir.
-            unique = '%s.state.sqlite' % hashlib.md5(self.outdir.encode()).hexdigest()
+            unique = f"{hashlib.md5(self.outdir.encode()).hexdigest()}.state.sqlite"
             statedb = os.path.join(self.opts.statedir, unique)
         else:
             statedb = os.path.join(self.outdir, 'state.sqlite')
@@ -309,16 +340,16 @@ class Repoview:
             self.opts.force = True
 
         self.sconn = sqlite.connect(statedb)
-        scursor = self.sconn.cursor()
+        scursor = self._cursor(self.sconn, 'state')
 
-        query = """CREATE TABLE IF NOT EXISTS state (
+        scursor.execute(
+            """CREATE TABLE IF NOT EXISTS state (
                           filename TEXT UNIQUE,
                           checksum TEXT)"""
-        scursor.execute(query)
+        )
 
         # read all state data into memory to track orphaned files
-        query = """SELECT filename, checksum FROM state"""
-        scursor.execute(query)
+        scursor.execute("SELECT filename, checksum FROM state")
         while True:
             row = scursor.fetchone()
             if row is None:
@@ -340,11 +371,12 @@ class Repoview:
         repomd = os.path.join(self.opts.repodir, 'repodata', 'repomd.xml')
 
         if not os.access(repomd, os.R_OK):
-            sys.stderr.write('Not found: %s\n' % repomd)
+            sys.stderr.write(f'Not found: {repomd}\n')
             sys.stderr.write('Does not look like a repository. Exiting.\n')
             sys.exit(1)
 
-        repoxml = open(repomd).read()
+        with open(repomd, encoding='utf-8') as repomd_fp:
+            repoxml = repomd_fp.read()
 
         xml = fromstring(repoxml) #IGNORE:E1101
         # look for primary_db, other_db, and optionally group
@@ -353,10 +385,18 @@ class Repoview:
 
         xmlns = 'http://linux.duke.edu/metadata/repo'
         for datanode in xml.findall('{%s}data' % xmlns):
-            href = datanode.find('{%s}location' % xmlns).attrib['href']
-            if datanode.attrib['type'] == 'primary_db':
+            location_node = datanode.find('{%s}location' % xmlns)
+            if location_node is None:
+                continue
+            href = location_node.attrib.get('href')
+            if href is None:
+                continue
+            dtype = datanode.attrib.get('type')
+            if dtype == 'primary_db':
                 primary = os.path.join(self.opts.repodir, href)
-                dbversion = datanode.find('{%s}database_version' % xmlns).text
+                version_node = datanode.find('{%s}database_version' % xmlns)
+                if version_node is not None and version_node.text is not None:
+                    dbversion = version_node.text
             elif datanode.attrib['type'] == 'other_db':
                 other = os.path.join(self.opts.repodir, href)
             elif datanode.attrib['type'] == 'group':
@@ -368,10 +408,9 @@ class Repoview:
             sys.exit(1)
 
         if int(dbversion) > SUPPORTED_DB_VERSION:
-            self.say('Sorry, the db_version in the repository is %s, but '
-                     'repoview only supports versions up to %s. Please check '
-                     'for a newer repoview version.\n' % (dbversion,
-                                                          SUPPORTED_DB_VERSION))
+            self.say(f'Sorry, the db_version in the repository is {dbversion}, but '
+                     f'repoview only supports versions up to {SUPPORTED_DB_VERSION}. '
+                     'Please check for a newer repoview version.\n')
             sys.exit(1)
 
         self.say('done\n')
@@ -414,16 +453,15 @@ class Repoview:
         # Formulate exclusion rule
         xarches = []
         for xarch in self.opts.xarch:
-            xarch = xarch.replace("'", "''")
-            xarches.append("arch != '%s'" % xarch)
+            safe_xarch = xarch.replace("'", "''")
+            xarches.append(f"arch != '{safe_xarch}'")
         if xarches:
             self.exclude += ' AND ' + ' AND '.join(xarches)
 
         pkgs = []
         for pkg in self.opts.ignore:
-            pkg = pkg.replace("'", "''")
-            pkg = pkg.replace("*", "%")
-            pkgs.append("name NOT LIKE '%s'" % pkg)
+            safe_pkg = pkg.replace("'", "''").replace("*", "%")
+            pkgs.append(f"name NOT LIKE '{safe_pkg}'")
         if pkgs:
             self.exclude += ' AND ' + ' AND '.join(pkgs)
 
@@ -483,25 +521,15 @@ class Repoview:
         @rtype:  dict
         """
         # fetch versions
-        query = """SELECT pkgKey,
-                          epoch,
-                          version,
-                          release,
-                          arch,
-                          summary,
-                          description,
-                          url,
-                          time_build,
-                          rpm_license,
-                          rpm_sourcerpm,
-                          size_package,
-                          location_href,
-                          rpm_vendor
-                     FROM packages
-                    WHERE name='%s' AND %s
-                 ORDER BY arch ASC""" % (pkgname, self.exclude)
-        pcursor = self.pconn.cursor()
-        pcursor.execute(query)
+        query = (
+            "SELECT pkgKey, epoch, version, release, arch, summary, "
+            "description, url, time_build, rpm_license, rpm_sourcerpm, "
+            "size_package, location_href, rpm_vendor "
+            "FROM packages WHERE name=? AND "
+            f"{self.exclude} ORDER BY arch ASC"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
+        pcursor.execute(query, (pkgname,))
 
         rows = pcursor.fetchall()
 
@@ -558,11 +586,13 @@ class Repoview:
             size = _humansize(size_package)
 
             # Get latest changelog entry for each version
-            query = '''SELECT author, date, changelog
-                         FROM changelog WHERE pkgKey=%d
-                     ORDER BY date DESC LIMIT 1''' % pkg_key
-            ocursor = self.oconn.cursor()
-            ocursor.execute(query)
+            query = (
+                "SELECT author, date, changelog "
+                "FROM changelog WHERE pkgKey=? "
+                "ORDER BY date DESC LIMIT 1"
+            )
+            ocursor = self._cursor(self.oconn, 'other')
+            ocursor.execute(query, (pkg_key,))
             orow = ocursor.fetchone()
             if not orow:
                 author = time_added = changelog = None
@@ -619,17 +649,21 @@ class Repoview:
 
             checksum = self.mk_checksum(repo_data, group_data, pkg_data)
             if self.has_changed(pkg_filename, checksum):
-                self.say('Writing package %s\n' % pkg_filename)
+                self.say(f'Writing package {pkg_filename}\n')
                 self.pkg_kid.group_data = group_data
                 self.pkg_kid.pkg_data = pkg_data
                 outfile = os.path.join(self.outdir, pkg_filename)
                 self.pkg_kid = TemplateLoader(self.opts.templatedir)
 
-                tmpl= self.pkg_kid.load( PKGKID )
+                tmpl = self.pkg_kid.load(PKGKID)
 
-                stream=tmpl.generate(group_data=group_data, pkg_data=pkg_data, repo_data=repo_data)
-                with open( outfile, "w" ) as f:
-                   f.write( stream.render('xhtml', doctype='xhtml-strict'))
+                stream = tmpl.generate(
+                    group_data=group_data,
+                    pkg_data=pkg_data,
+                    repo_data=repo_data,
+                )
+                with open(outfile, "w", encoding="utf-8") as handle:
+                    handle.write(stream.render('xhtml', doctype='xhtml-strict'))
                 self.written[pkgname] = pkg_tuple
             else:
                 self.written[pkgname] = pkg_tuple
@@ -674,19 +708,19 @@ class Repoview:
         @rtype:  bool
         """
         # calculate checksum
-        scursor = self.sconn.cursor()
+        scursor = self._cursor(self.sconn, 'state')
         if filename not in self.state_data:
             # totally new entry
             query = '''INSERT INTO state (filename, checksum)
-                                  VALUES ('%s', '%s')''' % (filename, checksum)
-            scursor.execute(query)
+                                  VALUES (?, ?)'''
+            scursor.execute(query, (filename, checksum))
             return True
         if self.state_data[filename] != checksum:
             # old entry, but changed
             query = """UPDATE state
-                          SET checksum='%s'
-                        WHERE filename='%s'""" % (checksum, filename)
-            scursor.execute(query)
+                          SET checksum=?
+                        WHERE filename=?"""
+            scursor.execute(query, (checksum, filename))
 
             # remove it from state_data tracking, so we know we've seen it
             del self.state_data[filename]
@@ -702,54 +736,44 @@ class Repoview:
 
         @rtype void
         """
-        scursor = self.sconn.cursor()
+        scursor = self._cursor(self.sconn, 'state')
         for filename in self.state_data:
-            self.say('Removing stale file %s\n' % filename)
+            self.say(f'Removing stale file {filename}\n')
             fullpath = os.path.join(self.outdir, filename)
             if os.access(fullpath, os.W_OK):
                 os.unlink(fullpath)
-            query = """DELETE FROM state WHERE filename='%s'""" % filename
-            scursor.execute(query)
+            scursor.execute("DELETE FROM state WHERE filename=?", (filename,))
 
     def z_handler(self, dbfile):
         """
         If the database file is compressed, uncompresses it and returns the
         filename of the uncompressed file.
-
+        
         @param dbfile: the name of the file
         @type  dbfile: str
-
+        
         @return: the name of the uncompressed file
         @rtype:  str
         """
-        (junk, ext) = os.path.splitext(dbfile)
-
-        if ext == '.bz2':
-            from bz2 import BZ2File
-            zfd = BZ2File(dbfile)
-        elif ext == '.gz':
-            from gzip import GzipFile
-            zfd = GzipFile(dbfile)
-        elif ext == '.xz':
-            from lzma import LZMAFile
-            zfd = LZMAFile(dbfile)
-        else:
+        (_, ext) = os.path.splitext(dbfile)
+        opener = {
+            '.bz2': BZ2File,
+            '.gz': GzipFile,
+            '.xz': LZMAFile,
+        }.get(ext)
+        if opener is None:
             # not compressed (or something odd)
             return dbfile
 
-        import tempfile
-        (unzfd, unzname) = tempfile.mkstemp('.repoview')
+        fd, unzname = mkstemp('.repoview')
         self.cleanup.append(unzname)
 
-        unzfd = open(unzname, 'wb')
-
-        while True:
-            data = zfd.read(16384)
-            if not data:
-                break
-            unzfd.write(data)
-        zfd.close()
-        unzfd.close()
+        with opener(dbfile) as zfd, os.fdopen(fd, 'wb') as unzfd:
+            while True:
+                data = zfd.read(16384)
+                if not data:
+                    break
+                unzfd.write(data)
 
         return unzname
 
@@ -762,21 +786,22 @@ class Repoview:
 
         @rtype: void
         """
-        import libcomps
+        if libcomps is None:
+            raise ImportError('Repoview requires the "libcomps" package to parse comps.xml.')
 
         self.say('Parsing comps.xml...')
         comps = libcomps.Comps()
         comps.fromxml_f(compsxml)
 
         for group in comps.groups:
-            #if not group.uservisible:
-                #continue
+            # if not group.uservisible:
+            #     continue
             if not group.packages:
-               continue
+                continue
 
             group_filename = _mkid(GRPFILE % group.id)
             pkg_names = [pkg.name for pkg in group.packages]
-            self.groups.append([ group.name, group_filename, group.desc, pkg_names ])
+            self.groups.append([group.name, group_filename, group.desc, pkg_names])
         self.say('done\n')
 
     def setup_rpm_groups(self):
@@ -787,24 +812,25 @@ class Repoview:
         @rtype: void
         """
         self.say('Collecting group information...')
-        query = """SELECT DISTINCT lower(rpm_group) AS rpm_group
-                     FROM packages
-                 ORDER BY rpm_group ASC"""
-        pcursor = self.pconn.cursor()
+        query = (
+            "SELECT DISTINCT lower(rpm_group) AS rpm_group "
+            "FROM packages ORDER BY rpm_group ASC"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
         pcursor.execute(query)
 
         for (rpmgroup,) in pcursor.fetchall():
-            qgroup = rpmgroup.replace("'", "''")
-            query = """SELECT DISTINCT name
-                         FROM packages
-                        WHERE lower(rpm_group)='%s'
-                          AND %s
-                     ORDER BY name""" % (qgroup, self.exclude)
-            pcursor.execute(query)
-            pkgnames = []
-            for (pkgname,) in pcursor.fetchall():
-                pkgnames.append(pkgname)
-
+            pcursor.execute(
+                (
+                    "SELECT DISTINCT name "
+                    "FROM packages "
+                    "WHERE lower(rpm_group)=? "
+                    f"  AND {self.exclude} "
+                    "ORDER BY name"
+                ),
+                (rpmgroup,),
+            )
+            pkgnames = [pkgname for (pkgname,) in pcursor.fetchall()]
             group_filename = _mkid(GRPFILE % rpmgroup)
             self.groups.append([rpmgroup, group_filename, None, pkgnames])
         self.say('done\n')
@@ -821,23 +847,27 @@ class Repoview:
         @rtype: list
         """
         self.say('Collecting latest packages...')
-        query = """SELECT name
-                     FROM packages
-                    WHERE %s
-                    GROUP BY name
-                 ORDER BY MAX(time_build) DESC LIMIT %s""" % (self.exclude, limit)
-        pcursor = self.pconn.cursor()
+        query = (
+            "SELECT name "
+            "FROM packages "
+            f"WHERE {self.exclude} "
+            "GROUP BY name "
+            f"ORDER BY MAX(time_build) DESC LIMIT {limit}"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
         pcursor.execute(query)
 
         latest = []
-        query = """SELECT version, release, time_build
-                     FROM packages
-                    WHERE name = '%s'
-                    ORDER BY time_build DESC LIMIT 1"""
+        query = (
+            "SELECT version, release, time_build "
+            "FROM packages "
+            "WHERE name = ? "
+            "ORDER BY time_build DESC LIMIT 1"
+        )
         for (pkgname,) in pcursor.fetchall():
             filename = _mkid(PKGFILE % pkgname.replace("'", "''"))
 
-            pcursor.execute(query % pkgname)
+            pcursor.execute(query, (pkgname,))
             (version, release, built) = pcursor.fetchone()
 
             latest.append((pkgname, filename, version, release, built))
@@ -853,25 +883,29 @@ class Repoview:
         @rtype:  str
         """
         self.say('Collecting letters...')
-        query = """SELECT DISTINCT substr(upper(name), 1, 1) AS letter
-                     FROM packages
-                    WHERE %s
-                 ORDER BY letter""" % self.exclude
-        pcursor = self.pconn.cursor()
+        query = (
+            "SELECT DISTINCT substr(upper(name), 1, 1) AS letter "
+            "FROM packages "
+            f"WHERE {self.exclude} "
+            "ORDER BY letter"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
         pcursor.execute(query)
 
         letters = ''
         for (letter,) in pcursor.fetchall():
             letters += letter
-            rpmgroup = 'Letter %s' % letter
-            description = 'Packages beginning with letter "%s".' % letter
+            rpmgroup = f'Letter {letter}'
+            description = f'Packages beginning with letter "{letter}".'
 
             pkgnames = []
-            query = """SELECT DISTINCT name
-                         FROM packages
-                        WHERE name LIKE '%s%%'
-                          AND %s""" % (letter, self.exclude)
-            pcursor.execute(query)
+            query = (
+                "SELECT DISTINCT name "
+                "FROM packages "
+                "WHERE name LIKE ? "
+                f"  AND {self.exclude}"
+            )
+            pcursor.execute(query, (f'{letter}%',))
             for (pkgname,) in pcursor.fetchall():
                 pkgnames.append(pkgname)
 
@@ -897,49 +931,19 @@ class Repoview:
         out = os.path.join(self.outdir, RSSFILE)
         etb.start('rss', {'version': '2.0'})
         etb.start('channel', {})
-        etb.start('title', {})
-        etb.data(repo_data['title'])
-        etb.end('title')
-        etb.start('link', {})
-        etb.data('%s/repoview/%s' % (self.opts.url, RSSFILE))
-        etb.end('link')
-        etb.start('description', {})
-        etb.data('Latest packages for %s' % repo_data['title'])
-        etb.end('description')
-        etb.start('lastBuildDate', {})
-        etb.data(time.strftime(ISOFORMAT))
-        etb.end('lastBuildDate')
-        etb.start('generator', {})
-        etb.data('Repoview-%s' % repo_data['my_version'])
-        etb.end('generator')
+        self._rss_add_text(etb, 'title', repo_data['title'])
+        self._rss_add_text(etb, 'link', f'{self.opts.url}/repoview/{RSSFILE}')
+        self._rss_add_text(etb, 'description', f"Latest packages for {repo_data['title']}")
+        self._rss_add_text(etb, 'lastBuildDate', time.strftime(ISOFORMAT))
+        self._rss_add_text(etb, 'generator', f"Repoview-{repo_data['my_version']}")
 
         rss_kid = self.pkg_kid.load(RSSKID)
         for row in latest:
             pkg_data = self.get_package_data(row[0])
+            if pkg_data is None:
+                continue
 
-            rpm = pkg_data['rpms'][0]
-            (epoch, version, release, arch, built) = rpm[:5]
-            etb.start('item', {})
-            etb.start('guid', {})
-            etb.data('%s/repoview/%s+%s:%s-%s.%s' % (self.opts.url,
-                                                     pkg_data['filename'],
-                                                     epoch, version, release,
-                                                     arch))
-            etb.end('guid')
-            etb.start('link', {})
-            etb.data('%s/repoview/%s' % (self.opts.url, pkg_data['filename']))
-            etb.end('link')
-            etb.start('pubDate', {})
-            etb.data(time.strftime(ISOFORMAT, time.gmtime(int(built))))
-            etb.end('pubDate')
-            etb.start('title', {})
-            etb.data('Update: %s-%s-%s' % (pkg_data['name'], version, release))
-            etb.end('title')
-            description = rss_kid.generate(pkg_data=pkg_data, repo_data=repo_data, url=self.opts.url).render()
-            etb.start('description', {})
-            etb.data(description)
-            etb.end('description')
-            etb.end('item')
+            self._rss_add_item(etb, rss_kid, repo_data, pkg_data)
 
         etb.end('channel')
         etb.end('rss')
@@ -949,6 +953,40 @@ class Repoview:
         out = os.path.join(self.outdir, RSSFILE)
         etree.write(out, 'utf-8')
         self.say('done\n')
+
+    def _rss_add_item(self, builder, rss_kid, repo_data, pkg_data):
+        """
+        Append a single package entry to the RSS feed builder.
+        """
+        rpm_entry = pkg_data['rpms'][0]
+        epoch, version, release, arch, built = rpm_entry[:5]
+
+        builder.start('item', {})
+
+        pkg_url = f"{self.opts.url}/repoview/{pkg_data['filename']}"
+        guid = (
+            f"{pkg_url}+{epoch}:{version}-"
+            f"{release}.{arch}"
+        )
+        self._rss_add_text(builder, 'guid', guid)
+        self._rss_add_text(builder, 'link', pkg_url)
+        pub_date = time.strftime(ISOFORMAT, time.gmtime(int(built)))
+        self._rss_add_text(builder, 'pubDate', pub_date)
+        title = f"Update: {pkg_data['name']}-{version}-{release}"
+        self._rss_add_text(builder, 'title', title)
+        description = rss_kid.generate(
+            pkg_data=pkg_data, repo_data=repo_data, url=self.opts.url
+        ).render()
+        self._rss_add_text(builder, 'description', description)
+
+        builder.end('item')
+
+    @staticmethod
+    def _rss_add_text(builder, tag, text):
+        """Helper for rss field generation."""
+        builder.start(tag, {})
+        builder.data(text)
+        builder.end(tag)
 
 
 def main():
