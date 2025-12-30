@@ -1,0 +1,3 @@
+.pylintrc
+.ruff_cache/
+.vscode/
