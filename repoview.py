@@ -30,7 +30,6 @@ directory, to make it easily browseable.
 # Copyright (C) 2007 by Konstantin Ryabitsev and contributors
 # Author: Konstantin Ryabitsev <icon@fedoraproject.org>
 #
-#pylint: disable-msg=F0401,W0704
 
 __revision__ = '$Id$'
 
@@ -40,7 +39,10 @@ import sys
 import time
 import hashlib
 import functools
-import rpm
+try:
+    import rpm  # type: ignore[import]
+except ImportError as exc:
+    raise ImportError('Repoview requires the "rpm" Python bindings.') from exc
 
 from optparse import OptionParser
 
@@ -242,15 +244,15 @@ class Repoview:
             checksum = self.mk_checksum(repo_data, group_data)
             if self.has_changed(grp_filename, checksum):
                 # write group file
-                self.say('Writing group %s\n' % grp_filename)
+                self.say(f'Writing group {grp_filename}\n')
                 self.group_kid.group_data = group_data
                 outfile = os.path.join(self.outdir, grp_filename)
 
-                tmpl= self.group_kid.load( GRPKID )
+                tmpl = self.group_kid.load(GRPKID)
 
-                stream=tmpl.generate(group_data=group_data, repo_data=repo_data)
-                with open( outfile, "w" ) as f:
-                   f.write( stream.render('xhtml', doctype='xhtml-strict'))
+                stream = tmpl.generate(group_data=group_data, repo_data=repo_data)
+                with open(outfile, "w", encoding="utf-8") as handle:
+                    handle.write(stream.render('xhtml', doctype='xhtml-strict'))
 
         # Phase 4: Build aggregated views (latest packages list, index page, optional RSS).
         latest = self.get_latest_packages()
@@ -261,18 +263,22 @@ class Repoview:
         if self.has_changed('index.html', checksum):
             # Write index.html and rss feed (if asked)
             self.say('Writing index.html...')
-            idx_tpt = os.path.join(self.opts.templatedir, IDXKID)
             idx_kid = TemplateLoader(self.opts.templatedir)
             idx_kid.url = self.opts.url
             idx_kid.latest = latest
             idx_kid.groups = self.groups
             outfile = os.path.join(self.outdir, 'index.html')
 
-            tmpl= idx_kid.load( IDXKID  )
+            tmpl = idx_kid.load(IDXKID)
 
-            stream=tmpl.generate( repo_data = repo_data, url=self.opts.url, groups = self.groups, latest = latest )
-            with open( outfile, "w" ) as f:
-               f.write( stream.render('xhtml', doctype='xhtml-strict'))
+            stream = tmpl.generate(
+                repo_data=repo_data,
+                url=self.opts.url,
+                groups=self.groups,
+                latest=latest,
+            )
+            with open(outfile, "w", encoding="utf-8") as handle:
+                handle.write(stream.render('xhtml', doctype='xhtml-strict'))
             self.say('done\n')
 
             # rss feed
@@ -297,7 +303,7 @@ class Repoview:
         if self.opts.statedir:
             # we'll use the md5sum of the repo location to make it unique
             # among multiple repositories sharing the same statedir.
-            unique = '%s.state.sqlite' % hashlib.md5(self.outdir.encode()).hexdigest()
+            unique = f"{hashlib.md5(self.outdir.encode()).hexdigest()}.state.sqlite"
             statedb = os.path.join(self.opts.statedir, unique)
         else:
             statedb = os.path.join(self.outdir, 'state.sqlite')
@@ -342,11 +348,12 @@ class Repoview:
         repomd = os.path.join(self.opts.repodir, 'repodata', 'repomd.xml')
 
         if not os.access(repomd, os.R_OK):
-            sys.stderr.write('Not found: %s\n' % repomd)
+            sys.stderr.write(f'Not found: {repomd}\n')
             sys.stderr.write('Does not look like a repository. Exiting.\n')
             sys.exit(1)
 
-        repoxml = open(repomd).read()
+        with open(repomd, encoding='utf-8') as repomd_fp:
+            repoxml = repomd_fp.read()
 
         xml = fromstring(repoxml) #IGNORE:E1101
         # look for primary_db, other_db, and optionally group
@@ -370,10 +377,9 @@ class Repoview:
             sys.exit(1)
 
         if int(dbversion) > SUPPORTED_DB_VERSION:
-            self.say('Sorry, the db_version in the repository is %s, but '
-                     'repoview only supports versions up to %s. Please check '
-                     'for a newer repoview version.\n' % (dbversion,
-                                                          SUPPORTED_DB_VERSION))
+            self.say(f'Sorry, the db_version in the repository is {dbversion}, but '
+                     f'repoview only supports versions up to {SUPPORTED_DB_VERSION}. '
+                     'Please check for a newer repoview version.\n')
             sys.exit(1)
 
         self.say('done\n')
@@ -416,16 +422,15 @@ class Repoview:
         # Formulate exclusion rule
         xarches = []
         for xarch in self.opts.xarch:
-            xarch = xarch.replace("'", "''")
-            xarches.append("arch != '%s'" % xarch)
+            safe_xarch = xarch.replace("'", "''")
+            xarches.append(f"arch != '{safe_xarch}'")
         if xarches:
             self.exclude += ' AND ' + ' AND '.join(xarches)
 
         pkgs = []
         for pkg in self.opts.ignore:
-            pkg = pkg.replace("'", "''")
-            pkg = pkg.replace("*", "%")
-            pkgs.append("name NOT LIKE '%s'" % pkg)
+            safe_pkg = pkg.replace("'", "''").replace("*", "%")
+            pkgs.append(f"name NOT LIKE '{safe_pkg}'")
         if pkgs:
             self.exclude += ' AND ' + ' AND '.join(pkgs)
 
@@ -621,17 +626,21 @@ class Repoview:
 
             checksum = self.mk_checksum(repo_data, group_data, pkg_data)
             if self.has_changed(pkg_filename, checksum):
-                self.say('Writing package %s\n' % pkg_filename)
+                self.say(f'Writing package {pkg_filename}\n')
                 self.pkg_kid.group_data = group_data
                 self.pkg_kid.pkg_data = pkg_data
                 outfile = os.path.join(self.outdir, pkg_filename)
                 self.pkg_kid = TemplateLoader(self.opts.templatedir)
 
-                tmpl= self.pkg_kid.load( PKGKID )
+                tmpl = self.pkg_kid.load(PKGKID)
 
-                stream=tmpl.generate(group_data=group_data, pkg_data=pkg_data, repo_data=repo_data)
-                with open( outfile, "w" ) as f:
-                   f.write( stream.render('xhtml', doctype='xhtml-strict'))
+                stream = tmpl.generate(
+                    group_data=group_data,
+                    pkg_data=pkg_data,
+                    repo_data=repo_data,
+                )
+                with open(outfile, "w", encoding="utf-8") as handle:
+                    handle.write(stream.render('xhtml', doctype='xhtml-strict'))
                 self.written[pkgname] = pkg_tuple
             else:
                 self.written[pkgname] = pkg_tuple
@@ -772,14 +781,14 @@ class Repoview:
         comps.fromxml_f(compsxml)
 
         for group in comps.groups:
-            #if not group.uservisible:
-                #continue
+            # if not group.uservisible:
+            #     continue
             if not group.packages:
-               continue
+                continue
 
             group_filename = _mkid(GRPFILE % group.id)
             pkg_names = [pkg.name for pkg in group.packages]
-            self.groups.append([ group.name, group_filename, group.desc, pkg_names ])
+            self.groups.append([group.name, group_filename, group.desc, pkg_names])
         self.say('done\n')
 
     def setup_rpm_groups(self):
