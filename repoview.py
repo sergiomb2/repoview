@@ -284,7 +284,21 @@ class Repoview:
 
         # Phase 5: Delete orphaned files and persist state so the next run can stay incremental.
         self.remove_stale()
-        self.sconn.commit()
+        self._ensure_connection(self.sconn, 'state').commit()
+
+    def _ensure_connection(self, conn, label):
+        """
+        Raise a helpful error if a SQLite connection has not been initialized yet.
+        """
+        if conn is None:
+            raise RuntimeError(f'{label} database connection is not initialized.')
+        return conn
+
+    def _cursor(self, conn, label):
+        """
+        Convenience helper for retrieving a cursor from a (possibly optional) connection.
+        """
+        return self._ensure_connection(conn, label).cursor()
 
     def setup_state_db(self):
         """
@@ -314,16 +328,12 @@ class Repoview:
             self.opts.force = True
 
         self.sconn = sqlite.connect(statedb)
-        scursor = self.sconn.cursor()
+        scursor = self._cursor(self.sconn, 'state')
 
-        query = """CREATE TABLE IF NOT EXISTS state (
-                          filename TEXT UNIQUE,
-                          checksum TEXT)"""
-        scursor.execute(query)
+        scursor.execute(""" CREATE TABLE IF NOT EXISTS state (filename TEXT UNIQUE, checksum TEXT) """)
 
         # read all state data into memory to track orphaned files
-        query = """SELECT filename, checksum FROM state"""
-        scursor.execute(query)
+        scursor.execute("SELECT filename, checksum FROM state")
         while True:
             row = scursor.fetchone()
             if row is None:
@@ -487,25 +497,15 @@ class Repoview:
         @rtype:  dict
         """
         # fetch versions
-        query = """SELECT pkgKey,
-                          epoch,
-                          version,
-                          release,
-                          arch,
-                          summary,
-                          description,
-                          url,
-                          time_build,
-                          rpm_license,
-                          rpm_sourcerpm,
-                          size_package,
-                          location_href,
-                          rpm_vendor
-                     FROM packages
-                    WHERE name='%s' AND %s
-                 ORDER BY arch ASC""" % (pkgname, self.exclude)
-        pcursor = self.pconn.cursor()
-        pcursor.execute(query)
+        query = (
+            "SELECT pkgKey, epoch, version, release, arch, summary, "
+            "description, url, time_build, rpm_license, rpm_sourcerpm, "
+            "size_package, location_href, rpm_vendor "
+            "FROM packages WHERE name=? AND "
+            f"{self.exclude} ORDER BY arch ASC"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
+        pcursor.execute(query, (pkgname,))
 
         rows = pcursor.fetchall()
 
@@ -562,11 +562,13 @@ class Repoview:
             size = _humansize(size_package)
 
             # Get latest changelog entry for each version
-            query = '''SELECT author, date, changelog
-                         FROM changelog WHERE pkgKey=%d
-                     ORDER BY date DESC LIMIT 1''' % pkg_key
-            ocursor = self.oconn.cursor()
-            ocursor.execute(query)
+            query = (
+                "SELECT author, date, changelog "
+                "FROM changelog WHERE pkgKey=? "
+                "ORDER BY date DESC LIMIT 1"
+            )
+            ocursor = self._cursor(self.oconn, 'other')
+            ocursor.execute(query, (pkg_key,))
             orow = ocursor.fetchone()
             if not orow:
                 author = time_added = changelog = None
@@ -682,19 +684,19 @@ class Repoview:
         @rtype:  bool
         """
         # calculate checksum
-        scursor = self.sconn.cursor()
+        scursor = self._cursor(self.sconn, 'state')
         if filename not in self.state_data:
             # totally new entry
             query = '''INSERT INTO state (filename, checksum)
-                                  VALUES ('%s', '%s')''' % (filename, checksum)
-            scursor.execute(query)
+                                  VALUES (?, ?)'''
+            scursor.execute(query, (filename, checksum))
             return True
         if self.state_data[filename] != checksum:
             # old entry, but changed
             query = """UPDATE state
-                          SET checksum='%s'
-                        WHERE filename='%s'""" % (checksum, filename)
-            scursor.execute(query)
+                          SET checksum=?
+                        WHERE filename=?"""
+            scursor.execute(query, (checksum, filename))
 
             # remove it from state_data tracking, so we know we've seen it
             del self.state_data[filename]
@@ -710,14 +712,13 @@ class Repoview:
 
         @rtype void
         """
-        scursor = self.sconn.cursor()
+        scursor = self._cursor(self.sconn, 'state')
         for filename in self.state_data:
             self.say(f'Removing stale file {filename}\n')
             fullpath = os.path.join(self.outdir, filename)
             if os.access(fullpath, os.W_OK):
                 os.unlink(fullpath)
-            query = """DELETE FROM state WHERE filename='%s'""" % filename
-            scursor.execute(query)
+            scursor.execute("DELETE FROM state WHERE filename=?", (filename,))
 
     def z_handler(self, dbfile):
         """
@@ -796,24 +797,25 @@ class Repoview:
         @rtype: void
         """
         self.say('Collecting group information...')
-        query = """SELECT DISTINCT lower(rpm_group) AS rpm_group
-                     FROM packages
-                 ORDER BY rpm_group ASC"""
-        pcursor = self.pconn.cursor()
+        query = (
+            "SELECT DISTINCT lower(rpm_group) AS rpm_group "
+            "FROM packages ORDER BY rpm_group ASC"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
         pcursor.execute(query)
 
         for (rpmgroup,) in pcursor.fetchall():
-            qgroup = rpmgroup.replace("'", "''")
-            query = """SELECT DISTINCT name
-                         FROM packages
-                        WHERE lower(rpm_group)='%s'
-                          AND %s
-                     ORDER BY name""" % (qgroup, self.exclude)
-            pcursor.execute(query)
-            pkgnames = []
-            for (pkgname,) in pcursor.fetchall():
-                pkgnames.append(pkgname)
-
+            pcursor.execute(
+                (
+                    "SELECT DISTINCT name "
+                    "FROM packages "
+                    "WHERE lower(rpm_group)=? "
+                    f"  AND {self.exclude} "
+                    "ORDER BY name"
+                ),
+                (rpmgroup,),
+            )
+            pkgnames = [pkgname for (pkgname,) in pcursor.fetchall()]
             group_filename = _mkid(GRPFILE % rpmgroup)
             self.groups.append([rpmgroup, group_filename, None, pkgnames])
         self.say('done\n')
@@ -830,23 +832,27 @@ class Repoview:
         @rtype: list
         """
         self.say('Collecting latest packages...')
-        query = """SELECT name
-                     FROM packages
-                    WHERE %s
-                    GROUP BY name
-                 ORDER BY MAX(time_build) DESC LIMIT %s""" % (self.exclude, limit)
-        pcursor = self.pconn.cursor()
+        query = (
+            "SELECT name "
+            "FROM packages "
+            f"WHERE {self.exclude} "
+            "GROUP BY name "
+            f"ORDER BY MAX(time_build) DESC LIMIT {limit}"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
         pcursor.execute(query)
 
         latest = []
-        query = """SELECT version, release, time_build
-                     FROM packages
-                    WHERE name = '%s'
-                    ORDER BY time_build DESC LIMIT 1"""
+        query = (
+            "SELECT version, release, time_build "
+            "FROM packages "
+            "WHERE name = ? "
+            "ORDER BY time_build DESC LIMIT 1"
+        )
         for (pkgname,) in pcursor.fetchall():
             filename = _mkid(PKGFILE % pkgname.replace("'", "''"))
 
-            pcursor.execute(query % pkgname)
+            pcursor.execute(query, (pkgname,))
             (version, release, built) = pcursor.fetchone()
 
             latest.append((pkgname, filename, version, release, built))
@@ -862,11 +868,13 @@ class Repoview:
         @rtype:  str
         """
         self.say('Collecting letters...')
-        query = """SELECT DISTINCT substr(upper(name), 1, 1) AS letter
-                     FROM packages
-                    WHERE %s
-                 ORDER BY letter""" % self.exclude
-        pcursor = self.pconn.cursor()
+        query = (
+            "SELECT DISTINCT substr(upper(name), 1, 1) AS letter "
+            "FROM packages "
+            f"WHERE {self.exclude} "
+            "ORDER BY letter"
+        )
+        pcursor = self._cursor(self.pconn, 'primary')
         pcursor.execute(query)
 
         letters = ''
@@ -876,11 +884,13 @@ class Repoview:
             description = f'Packages beginning with letter "{letter}".'
 
             pkgnames = []
-            query = """SELECT DISTINCT name
-                         FROM packages
-                        WHERE name LIKE '%s%%'
-                          AND %s""" % (letter, self.exclude)
-            pcursor.execute(query)
+            query = (
+                "SELECT DISTINCT name "
+                "FROM packages "
+                "WHERE name LIKE ? "
+                f"  AND {self.exclude}"
+            )
+            pcursor.execute(query, (f'{letter}%',))
             for (pkgname,) in pcursor.fetchall():
                 pkgnames.append(pkgname)
 
