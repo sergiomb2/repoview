@@ -116,7 +116,7 @@ def _humansize(num_bytes):
 def _compare_evra(one, two):
     """
     Comparison helper for sorting packages by EVR (Epoch, Version, Release).
-    
+
     It adapts the tuple format for use with rpm.labelCompare.
 
     @param one: tuple of (e,v,r,a)
@@ -136,7 +136,7 @@ def _compare_evra(one, two):
 class Repoview:
     """
     The main controller class for Repoview.
-    
+
     This class handles the entire workflow:
     1. initializing repository connections and state database,
     2. processing groups and packages,
@@ -171,10 +171,10 @@ class Repoview:
         self.exclude    = '1=1'
         # Dictionary storing filename -> checksum mapping from the state database (previous run).
         # Used to determine if a file needs to be regenerated.
-        self.state_data = {} 
+        self.state_data = {}
         # Dictionary tracking packages processed in the current run to handle duplicates
         # and avoid re-processing. Maps pkgname -> pkg_tuple.
-        self.written    = {} 
+        self.written    = {}
 
         self.groups        = []
         self.letter_groups = []
@@ -303,9 +303,9 @@ class Repoview:
     def setup_state_db(self):
         """
         Initializes the SQLite database used for incremental build state tracking.
-        
-        The database stores checksums of previously generated files to avoid 
-        unnecessary writes. If a specific state directory is not provided, 
+
+        The database stores checksums of previously generated files to avoid
+        unnecessary writes. If a specific state directory is not provided,
         it creates 'state.sqlite' in the output directory.
 
         @rtype: void
@@ -344,8 +344,8 @@ class Repoview:
     def setup_repo(self):
         """
         Validates the repository structure and initializes database connections.
-        
-        It parses 'repodata/repomd.xml' to locate the 'primary' (packages) and 
+
+        It parses 'repodata/repomd.xml' to locate the 'primary' (packages) and
         'other' (changelogs) SQLite databases, as well as the 'group' (comps) file.
         It also checks for schema version compatibility.
 
@@ -421,7 +421,7 @@ class Repoview:
 
     def setup_excludes(self):
         """
-        Constructs the 'self.exclude' SQL clause to filter packages based on 
+        Constructs the 'self.exclude' SQL clause to filter packages based on
         command-line ignore patterns and architecture exclusions.
 
         @rtype: void
@@ -444,7 +444,7 @@ class Repoview:
     def setup_outdir(self):
         """
         Prepares the output directory for generating the static site.
-        
+
         It handles cleaning up if force mode is active, ensures correct permissions (755),
         and copies static layout assets (CSS, images) from the template directory.
 
@@ -469,7 +469,7 @@ class Repoview:
     def get_package_data(self, pkgname):
         """
         Queries the packages and changelog databases to construct a detailed package record.
-        
+
         It aggregates all available versions/architectures of the package into a single
         dictionary structure.
 
@@ -649,13 +649,13 @@ class Repoview:
     def mk_checksum(self, *args):
         """
         Calculates a deterministic MD5 checksum for the provided data dictionaries.
-        
+
         This checksum is used for state tracking to detect if the content of a page
         would change based on the data. It sorts dictionary keys to ensure consistency
         before hashing.
 
         @param *args: One or more dictionaries containing data to be hashed.
-        
+
         @return: An MD5 checksum string of the serialized data.
         @rtype:  str
         """
@@ -791,7 +791,7 @@ class Repoview:
 
     def setup_rpm_groups(self):
         """
-        Fallback method to group packages using their RPM 'Group' tag 
+        Fallback method to group packages using their RPM 'Group' tag
         when a valid comps.xml is not available.
 
         @rtype: void
