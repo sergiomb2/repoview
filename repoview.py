@@ -912,49 +912,19 @@ class Repoview:
         out = os.path.join(self.outdir, RSSFILE)
         etb.start('rss', {'version': '2.0'})
         etb.start('channel', {})
-        etb.start('title', {})
-        etb.data(repo_data['title'])
-        etb.end('title')
-        etb.start('link', {})
-        etb.data('%s/repoview/%s' % (self.opts.url, RSSFILE))
-        etb.end('link')
-        etb.start('description', {})
-        etb.data('Latest packages for %s' % repo_data['title'])
-        etb.end('description')
-        etb.start('lastBuildDate', {})
-        etb.data(time.strftime(ISOFORMAT))
-        etb.end('lastBuildDate')
-        etb.start('generator', {})
-        etb.data('Repoview-%s' % repo_data['my_version'])
-        etb.end('generator')
+        self._rss_add_text(etb, 'title', repo_data['title'])
+        self._rss_add_text(etb, 'link', f'{self.opts.url}/repoview/{RSSFILE}')
+        self._rss_add_text(etb, 'description', f"Latest packages for {repo_data['title']}")
+        self._rss_add_text(etb, 'lastBuildDate', time.strftime(ISOFORMAT))
+        self._rss_add_text(etb, 'generator', f"Repoview-{repo_data['my_version']}")
 
         rss_kid = self.pkg_kid.load(RSSKID)
         for row in latest:
             pkg_data = self.get_package_data(row[0])
+            if pkg_data is None:
+                continue
 
-            rpm = pkg_data['rpms'][0]
-            (epoch, version, release, arch, built) = rpm[:5]
-            etb.start('item', {})
-            etb.start('guid', {})
-            etb.data('%s/repoview/%s+%s:%s-%s.%s' % (self.opts.url,
-                                                     pkg_data['filename'],
-                                                     epoch, version, release,
-                                                     arch))
-            etb.end('guid')
-            etb.start('link', {})
-            etb.data('%s/repoview/%s' % (self.opts.url, pkg_data['filename']))
-            etb.end('link')
-            etb.start('pubDate', {})
-            etb.data(time.strftime(ISOFORMAT, time.gmtime(int(built))))
-            etb.end('pubDate')
-            etb.start('title', {})
-            etb.data('Update: %s-%s-%s' % (pkg_data['name'], version, release))
-            etb.end('title')
-            description = rss_kid.generate(pkg_data=pkg_data, repo_data=repo_data, url=self.opts.url).render()
-            etb.start('description', {})
-            etb.data(description)
-            etb.end('description')
-            etb.end('item')
+            self._rss_add_item(etb, rss_kid, repo_data, pkg_data)
 
         etb.end('channel')
         etb.end('rss')
@@ -964,6 +934,40 @@ class Repoview:
         out = os.path.join(self.outdir, RSSFILE)
         etree.write(out, 'utf-8')
         self.say('done\n')
+
+    def _rss_add_item(self, builder, rss_kid, repo_data, pkg_data):
+        """
+        Append a single package entry to the RSS feed builder.
+        """
+        rpm_entry = pkg_data['rpms'][0]
+        epoch, version, release, arch, built = rpm_entry[:5]
+
+        builder.start('item', {})
+
+        pkg_url = f"{self.opts.url}/repoview/{pkg_data['filename']}"
+        guid = (
+            f"{pkg_url}+{epoch}:{version}-"
+            f"{release}.{arch}"
+        )
+        self._rss_add_text(builder, 'guid', guid)
+        self._rss_add_text(builder, 'link', pkg_url)
+        pub_date = time.strftime(ISOFORMAT, time.gmtime(int(built)))
+        self._rss_add_text(builder, 'pubDate', pub_date)
+        title = f"Update: {pkg_data['name']}-{version}-{release}"
+        self._rss_add_text(builder, 'title', title)
+        description = rss_kid.generate(
+            pkg_data=pkg_data, repo_data=repo_data, url=self.opts.url
+        ).render()
+        self._rss_add_text(builder, 'description', description)
+
+        builder.end('item')
+
+    @staticmethod
+    def _rss_add_text(builder, tag, text):
+        """Helper for rss field generation."""
+        builder.start(tag, {})
+        builder.data(text)
+        builder.end(tag)
 
 
 def main():
