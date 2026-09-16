@@ -364,10 +364,20 @@ class Repoview:
 
         xmlns = 'http://linux.duke.edu/metadata/repo'
         for datanode in xml.findall('{%s}data' % xmlns):
-            href = datanode.find('{%s}location' % xmlns).attrib['href']
-            if datanode.attrib['type'] == 'primary_db':
+            location_node = datanode.find('{%s}location' % xmlns)
+            if location_node is None:
+                self.say(f'location_node {xmlns} not found, this may be an issue')
+                continue
+            href = location_node.attrib.get('href')
+            if href is None:
+                self.say(f'href of location_node {xmlns} not found, this may be an issue')
+                continue
+            dtype = datanode.attrib.get('type')
+            if dtype == 'primary_db':
                 primary = os.path.join(self.opts.repodir, href)
-                dbversion = datanode.find('{%s}database_version' % xmlns).text
+                version_node = datanode.find('{%s}database_version' % xmlns)
+                if version_node is not None and version_node.text is not None:
+                    dbversion = version_node.text
             elif datanode.attrib['type'] == 'other_db':
                 other = os.path.join(self.opts.repodir, href)
             elif datanode.attrib['type'] == 'group':
