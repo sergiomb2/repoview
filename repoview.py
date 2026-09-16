@@ -40,16 +40,9 @@ import time
 import hashlib
 import functools
 import rpm
-
 from optparse import OptionParser
-
-try:
-    from genshi.template import TemplateLoader  # type: ignore[import]
-except ImportError as exc:
-    raise ImportError('Repoview requires the "genshi" package.') from exc
-
+from genshi.template import TemplateLoader
 from xml.etree.ElementTree import fromstring, ElementTree, TreeBuilder
-
 import sqlite3 as sqlite
 
 try:
@@ -249,7 +242,8 @@ class Repoview:
 
                 stream = tmpl.generate(group_data=group_data, repo_data=repo_data)
                 with open(outfile, "w", encoding="utf-8") as handle:
-                    handle.write(stream.render('xhtml', doctype='xhtml-strict'))
+                    contents = stream.render('xhtml', doctype='xhtml-strict') or ""
+                    handle.write(contents)
 
         # Phase 4: Build aggregated views (latest packages list, index page, optional RSS).
         latest = self.get_latest_packages()
@@ -275,7 +269,8 @@ class Repoview:
                 latest=latest,
             )
             with open(outfile, "w", encoding="utf-8") as handle:
-                handle.write(stream.render('xhtml', doctype='xhtml-strict'))
+                contents = stream.render('xhtml', doctype='xhtml-strict') or ""
+                handle.write(contents)
             self.say('done\n')
 
             # rss feed
@@ -639,7 +634,8 @@ class Repoview:
                     repo_data=repo_data,
                 )
                 with open(outfile, "w", encoding="utf-8") as handle:
-                    handle.write(stream.render('xhtml', doctype='xhtml-strict'))
+                    contents = stream.render('xhtml', doctype='xhtml-strict') or ""
+                    handle.write(contents)
                 self.written[pkgname] = pkg_tuple
             else:
                 self.written[pkgname] = pkg_tuple
